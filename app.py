@@ -1,152 +1,72 @@
-import streamlit as st
-import pdfplumber
-import pandas as pd
-import fitz  # PyMuPDF
-import io
-from PIL import Image
-from datetime import datetime
+    # ==========================================
+    # TAHAP BARU: EKSTRAKSI TEKS DOKUMENTASI
+    # ==========================================
+    with st.spinner("Menyadap keterangan visual dari PDF Dokumentasi..."):
+        doc_foto = fitz.open(stream=file_dokumentasi.read(), filetype="pdf")
+        teks_dokumentasi_full = ""
+        
+        # Menyedot seluruh teks (terutama kolom "Kegiatan") dari PDF Foto
+        for page in doc_foto:
+            teks_dokumentasi_full += page.get_text("text").lower()
 
-# Konfigurasi Halaman (Optimasi Handphone)
-st.set_page_config(page_title="Audit Forensik PHTC", page_icon="⚖️", layout="wide")
-
-# Tema Profesional
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    </style>
-    """, unsafe_allow_html=True)
-
-st.title("🛡️ Sistem Audit Forensik & Verifikasi Material")
-st.caption("Standard Operational Protocol: Aurelius Vishvakarma Precision Logic")
-st.markdown("---")
-
-# 1. SIDEBAR & INPUT
-st.sidebar.header("Pusat Kendali Dokumen")
-file_mingguan = st.sidebar.file_uploader("1. Laporan Mingguan (PDF)", type="pdf")
-file_dokumentasi = st.sidebar.file_uploader("2. Laporan Dokumentasi (PDF)", type="pdf")
-
-if not (file_mingguan and file_dokumentasi):
-    st.info("Silakan unggah kedua dokumen PDF melalui sidebar untuk memulai audit forensik.")
-    st.stop()
-
-# 2. EKSEKUSI AUDIT
-if st.sidebar.button("⚙️ JALANKAN AUDIT KOMPREHENSIF", use_container_width=True):
+    # ==========================================
+    # TAHAP 1 & VALIDASI SILANG (OUTPUT 4)
+    # ==========================================
+    st.header("🔍 Hasil Audit & Validasi Silang (Klaim vs Bukti)")
     
-    # --- OUTPUT 1 & 4: LOG ANOMALI & VALIDASI SILANG ---
-    st.header("🔍 Hasil Audit & Validasi Silang")
-    
-    with st.spinner("Menganalisis integritas data matematis..."):
+    with st.spinner("Melakukan cross-checking antara klaim angka dan bukti di lapangan..."):
         temuan_anomali = []
-        ringkasan_progres = []
+        laporan_validasi_silang = []
         
         with pdfplumber.open(file_mingguan) as pdf:
-            # Iterasi halaman lampiran kemajuan fisik (biasanya di paruh kedua PDF)
-            for i in range(len(pdf.pages)):
+            start_page = max(0, len(pdf.pages) - 5) # Fokus ke lampiran progress
+            for i in range(start_page, len(pdf.pages)):
                 tabel = pdf.pages[i].extract_table()
                 if not tabel: continue
                 
                 for row in tabel:
                     try:
-                        # Mendeteksi baris pekerjaan berdasarkan pola kolom (Volume/Bobot)
                         if row[1] and row[5] and row[8] and row[11]:
                             uraian = str(row[1]).replace('\n', ' ')
                             b_lalu = float(str(row[5]).replace(',', '.'))
-                            b_ini = float(str(row[8]).replace(',', '.'))
+                            b_ini = float(str(row[8]).replace(',', '.')) # PROGRESS MINGGU INI
                             klaim_total = float(str(row[11]).replace(',', '.'))
                             
+                            # 1. Cek Anomali Matematis
                             hitungan_sistem = round(b_lalu + b_ini, 3)
-                            deviasi = round(klaim_total - hitungan_sistem, 3)
-                            
-                            # Simpan untuk ringkasan
-                            ringkasan_progres.append({"Pekerjaan": uraian, "Bobot": b_ini})
-                            
-                            if abs(deviasi) > 0.001:
+                            if hitungan_sistem != round(klaim_total, 3):
                                 temuan_anomali.append({
-                                    "Item Pekerjaan": uraian,
-                                    "Klaim Laporan": f"{klaim_total}%",
-                                    "Hitungan Sistem": f"{hitungan_sistem}%",
-                                    "Selisih desimal": deviasi
+                                    "Pekerjaan": uraian,
+                                    "Klaim Kumulatif": klaim_total,
+                                    "Sistem Matematika": hitungan_sistem
+                                })
+                            
+                            # 2. LOGIKA VALIDASI SILANG MUTLAK
+                            # Jika ada progres minggu ini (> 0%), WAJIB ada di PDF Laporan Dokumentasi
+                            if b_ini > 0:
+                                # Mengambil 2 kata kunci utama dari uraian (menghindari ketidakcocokan spasi/typo)
+                                kata_kunci = uraian.lower().split()[:2] 
+                                keyword_pencarian = " ".join(kata_kunci)
+                                
+                                # Cek apakah keyword pekerjaan ini ada di teks PDF Dokumentasi
+                                if keyword_pencarian in teks_dokumentasi_full:
+                                    status_bukti = "✅ Bukti Ditemukan"
+                                else:
+                                    status_bukti = "❌ BUKTI VISUAL TIDAK ADA!"
+                                
+                                laporan_validasi_silang.append({
+                                    "Item Pekerjaan (Progres > 0%)": uraian,
+                                    "Klaim Penambahan Bobot": f"+{b_ini}%",
+                                    "Status Dokumentasi": status_bukti
                                 })
                     except: continue
 
-    # Tampilkan Anomali (Output 1)
-    if temuan_anomali:
-        st.error(f"🚩 Ditemukan {len(temuan_anomali)} Ketidaksesuaian Perhitungan desimal!")
-        st.table(pd.DataFrame(temuan_anomali))
+    # Menampilkan Matriks Validasi Silang
+    st.subheader("Rapor Validasi Silang (Kesesuaian Item Pekerjaan & Foto)")
+    if laporan_validasi_silang:
+        df_validasi = pd.DataFrame(laporan_validasi_silang)
+        # Memberikan warna merah pada baris yang tidak ada buktinya
+        st.dataframe(df_validasi.style.applymap(lambda x: 'background-color: #ffcccc; color: red' if x == "❌ BUKTI VISUAL TIDAK ADA!" else '', subset=['Status Dokumentasi']), use_container_width=True)
     else:
-        st.success("✅ Integritas Matematis: Sempurna (Tidak ditemukan deviasi angka).")
-
-    st.markdown("---")
-
-    # --- OUTPUT 2 & 3: MATRIKS KOMPARASI & METADATA ---
-    st.header("🖼️ Analisis Forensik Bukti Material")
-    
-    with st.spinner("Mengekstrak bukti foto dan metadata asli..."):
-        doc_foto = fitz.open(stream=file_dokumentasi.read(), filetype="pdf")
-        total_img = 0
-        metadata_report = []
-        
-        # Grid Foto (Output 2)
-        cols = st.columns(2)
-        
-        for p_idx in range(len(doc_foto)):
-            page = doc_foto[p_idx]
-            img_list = page.get_images(full=True)
-            
-            for i_idx, img in enumerate(img_list):
-                xref = img[0]
-                base_img = doc_foto.extract_image(xref)
-                img_bytes = base_img["image"]
-                img_ext = base_img["ext"]
-                
-                # Render Foto
-                image = Image.open(io.BytesIO(img_bytes))
-                w, h = image.size
-                
-                if w > 150: # Filter logo/icon
-                    total_img += 1
-                    with cols[total_img % 2]:
-                        st.image(image, caption=f"Bukti {total_img} (Hal {p_idx+1})", use_container_width=True)
-                    
-                    # Metadata Audit (Output 3)
-                    metadata_report.append({
-                        "ID Bukti": f"IMG_{total_img}",
-                        "Sumber": f"Halaman {p_idx+1}",
-                        "Dimensi Asli": f"{w}x{h} px",
-                        "Format": img_ext.upper(),
-                        "Indikasi": "Valid" if w > 500 else "Resolusi Rendah (Risiko Kompresi)"
-                    })
-
-    st.subheader("📋 Laporan Audit Metadata & Resolusi")
-    st.dataframe(pd.DataFrame(metadata_report), use_container_width=True)
-
-    st.markdown("---")
-
-    # --- OUTPUT 5: DRAF BERITA ACARA TEMUAN ---
-    st.header("📝 Draf Nota Dinas / Berita Acara Temuan")
-    
-    # Logika Rangkuman Eksekutif
-    status_audit = "DITOLAK/REVISI" if temuan_anomali else "DISETUJUI"
-    
-    ba_text = f"""
-    BERITA ACARA PEMERIKSAAN DOKUMEN (DESK AUDIT)
-    -------------------------------------------
-    PROYEK: REHABILITASI DAN RENOVASI MADRASAH PHTC KALSEL 6
-    TANGGAL AUDIT: {datetime.now().strftime('%d-%m-%Y')}
-    
-    HASIL PEMERIKSAAN:
-    1. Integritas Angka: {'Ditemukan Anomali desimal' if temuan_anomali else 'Valid'}
-    2. Ketersediaan Bukti Fisik: Ditemukan {total_img} foto dokumentasi terekstrak.
-    
-    KESIMPULAN:
-    Berdasarkan hasil audit sistem, laporan ini dinyatakan {status_audit} 
-    untuk diproses ke tahap administrasi selanjutnya.
-    
-    CATATAN:
-    - {f'Perbaiki selisih angka pada {len(temuan_anomali)} item pekerjaan.' if temuan_anomali else 'Dokumen konsisten secara matematis.'}
-    - Pastikan foto resolusi rendah pada laporan visual diganti dengan file asli.
-    """
-    st.code(ba_text, language="text")
-    st.download_button("📥 Unduh Draf Temuan Audit", ba_text, file_name="Draf_Temuan_Audit.txt")
+        st.info("Tidak ada penambahan progres signifikan minggu ini untuk divalidasi.")
 
