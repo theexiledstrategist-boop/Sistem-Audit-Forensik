@@ -8,152 +8,177 @@ from PIL import Image
 from datetime import datetime
 
 # ==========================================
-# 1. KONFIGURASI UI (OPTIMASI SMARTPHONE)
+# 1. SETTING UI PROFESIONAL
 # ==========================================
-st.set_page_config(page_title="Audit Forensik Lintas Madrasah", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Sistem Audit Forensik PHTC", page_icon="🛡️", layout="wide")
 
 st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    .stAlert { border-radius: 10px; }
-    .status-ok { background-color: #ccffcc; color: green; padding: 5px; border-radius: 5px; font-weight: bold; }
-    .status-fail { background-color: #ffcccc; color: red; padding: 5px; border-radius: 5px; font-weight: bold; }
+    .main { background-color: #f4f6f9; }
+    .report-card { background-color: #ffffff; padding: 20px; border-radius: 10px; border-left: 5px solid #007bff; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .status-badge { padding: 5px 10px; border-radius: 15px; font-weight: bold; font-size: 0.8em; }
+    .crit-alert { color: #721c24; background-color: #f8d7da; padding: 15px; border-radius: 5px; border: 1px solid #f5c6cb; }
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. LOGIKA KRITIS (CONTEXT-AWARE MATCHING)
+# 2. MESIN ANALITIK (LOGIKA VALIDASI)
 # ==========================================
 
-def bersihkan_angka(teks):
-    if not teks: return 0.0
-    try:
-        return float(str(teks).strip().replace(' ', '').replace(',', '.'))
-    except:
-        return 0.0
+def clean_val(val):
+    if not val: return 0.0
+    try: return float(str(val).strip().replace(' ', '').replace(',', '.'))
+    except: return 0.0
 
-def cari_lokasi(teks):
-    """Mendeteksi Nama Madrasah (MIS/MTSS) sebagai context lokasi."""
-    match = re.search(r'(MIS|MTSS)\s+[A-Z\s\']+', teks.upper())
+def detect_location(text):
+    match = re.search(r'(MIS|MTSS)\s+[A-Z\s\']+', text.upper())
     return match.group(0).strip() if match else None
 
-def ambil_bangunan(teks):
-    """Mengekstrak identitas bangunan (misal: Bangunan A, B, E)."""
-    match = re.search(r'BANGUNAN\s+[A-Z\d]+', teks.upper())
+def get_building(text):
+    match = re.search(r'BANGUNAN\s+[A-Z\d]+', text.upper())
     return match.group(0).strip() if match else None
 
 # ==========================================
-# 3. INTERFACE & INPUT
+# 3. HEADER & UPLOAD
 # ==========================================
-st.title("🛡️ Audit Forensik Dokumen PHTC")
-st.caption("Validasi Progres Fisik & Bukti Visual Lintas Lokasi")
+st.title("🛡️ Desk Audit System: Kendali Mutu Prasarana Strategis")
+st.caption("Protokol Verifikasi Mutlak - Khusus Pengawasan Jarak Jauh")
 
-st.sidebar.header("📁 Upload Dokumen")
-file_mingguan = st.sidebar.file_uploader("1. Laporan Mingguan (PDF)", type="pdf")
-file_dokumentasi = st.sidebar.file_uploader("2. Laporan Dokumentasi (PDF)", type="pdf")
+with st.sidebar:
+    st.header("📥 Input Dokumen")
+    f_mingguan = st.file_uploader("Upload Laporan Mingguan", type="pdf")
+    f_foto = st.file_uploader("Upload Laporan Dokumentasi", type="pdf")
+    st.markdown("---")
+    execute = st.button("🚀 EKSEKUSI AUDIT MENYELURUH", use_container_width=True)
 
-if not (file_mingguan and file_dokumentasi):
-    st.warning("Silakan unggah kedua PDF untuk memulai audit menyeluruh terhadap semua lokasi madrasah.")
+if not (f_mingguan and f_foto):
+    st.info("Sistem siap. Silakan unggah dokumen PDF di sidebar untuk memulai verifikasi otomatis.")
     st.stop()
 
 # ==========================================
-# 4. PROSES AUDIT TOTAL
+# 4. EKSEKUSI LOGIKA
 # ==========================================
-if st.sidebar.button("⚙️ JALANKAN AUDIT SEMUA ITEM", use_container_width=True):
-    
-    # FASE 1: Membaca Seluruh Teks Dokumentasi
-    with st.spinner("Memindai database foto dokumentasi..."):
-        teks_foto_full = ""
-        doc_foto = fitz.open(stream=file_dokumentasi.read(), filetype="pdf")
-        for page in doc_foto:
-            teks_foto_full += page.get_text("text").upper() + " "
-        file_dokumentasi.seek(0)
+if execute:
+    # A. PRE-PROCESSING DOKUMENTASI
+    with st.spinner("Mengekstrak bukti visual dan metadata..."):
+        teks_foto_db = ""
+        galeri_images = []
+        doc_f = fitz.open(stream=f_foto.read(), filetype="pdf")
+        for i in range(len(doc_f)):
+            p = doc_f[i]
+            teks_foto_db += p.get_text("text").upper() + " "
+            for img in p.get_images(full=True):
+                xref = img[0]
+                pix = doc_f.extract_image(xref)
+                image = Image.open(io.BytesIO(pix["image"]))
+                if image.width > 200: # Abaikan logo kecil
+                    galeri_images.append({"img": image, "hal": i+1, "res": f"{image.width}x{image.height}"})
+        f_foto.seek(0)
 
-    # FASE 2: Iterasi Laporan Mingguan (Semua Halaman)
-    st.header("🔍 Hasil Pemeriksaan Lintas Lokasi")
-    
-    anomali_angka = []
-    hasil_validasi = []
-    lokasi_sekarang = "LOKASI TIDAK TERDETEKSI"
+    # B. AUDIT TABEL PROGRES
+    results_audit = []
+    anomali_matematika = []
+    lokasi_aktif = "UMUM"
 
-    with st.spinner("Membedah setiap baris pekerjaan di laporan mingguan..."):
-        with pdfplumber.open(file_mingguan) as pdf:
+    with st.spinner("Membedah baris pekerjaan dan sinkronisasi data..."):
+        with pdfplumber.open(f_mingguan) as pdf:
             for page in pdf.pages:
-                tabel = page.extract_table()
-                if not tabel: continue
-                
-                for row in tabel:
+                tables = page.extract_table()
+                if not tables: continue
+                for row in tables:
                     try:
+                        # Identifikasi Baris & Konteks
                         uraian = str(row[1]).replace('\n', ' ').strip()
-                        
-                        # A. Update Lokasi Madrasah jika baris adalah Header Lokasi
-                        lokasi_baru = cari_lokasi(uraian)
-                        if lokasi_baru:
-                            lokasi_sekarang = lokasi_baru
-                        
-                        # B. Ambil Data Progres (Kolom 5, 8, 11 sesuai format Anda)
-                        b_lalu = bersihkan_angka(row[5])
-                        b_ini = bersihkan_angka(row[8])
-                        b_total = bersihkan_angka(row[11])
-                        
+                        new_loc = detect_location(uraian)
+                        if new_loc: lokasi_aktif = new_loc
+
+                        b_lalu = clean_val(row[5])
+                        b_ini = clean_val(row[8])
+                        b_total_klaim = clean_val(row[11])
+
                         if b_ini > 0:
-                            # 1. Audit Matematika
-                            hitungan = round(b_lalu + b_ini, 3)
-                            if abs(b_total - hitungan) > 0.001:
-                                anomali_angka.append({
-                                    "Lokasi": lokasi_sekarang,
-                                    "Item": uraian,
-                                    "Selisih": round(b_total - hitungan, 3)
-                                })
+                            # 1. Cek Matematika
+                            real_calc = round(b_lalu + b_ini, 3)
+                            diff = round(b_total_klaim - real_calc, 3)
+                            if abs(diff) > 0.001:
+                                anomali_matematika.append({"Lokasi": lokasi_aktif, "Item": uraian, "Klaim": b_total_klaim, "Sistem": real_calc, "Selisih": diff})
+
+                            # 2. Cek Visual (Cross-Check)
+                            bldg = get_building(uraian)
+                            loc_kw = lokasi_aktif.replace("MIS ", "").replace("MTSS ", "").split()[0]
                             
-                            # 2. Audit Visual (Matching Madrasah + Bangunan)
-                            id_bangunan = ambil_bangunan(uraian)
+                            found_loc = loc_kw in teks_foto_db
+                            found_bldg = (bldg in teks_foto_db) if bldg else True
                             
-                            # Kriteria: Madrasah harus ada di teks, dan Bangunan (jika ada) harus ada
-                            keyword_lokasi = lokasi_sekarang.replace("MIS ", "").replace("MTSS ", "").split()[0] # Ambil kata depan (e.g. DARUL)
+                            status = "✅ VALID"
+                            catatan = "Bukti visual ditemukan."
                             
-                            if keyword_lokasi in teks_foto_full:
-                                if id_bangunan:
-                                    if id_bangunan in teks_foto_full:
-                                        status = "✅ BUKTI ADA"
-                                    else:
-                                        status = f"❌ FOTO {id_bangunan} TIDAK ADA"
-                                else:
-                                    status = "✅ LOKASI TERVERIFIKASI"
-                            else:
-                                status = "❌ LOKASI TIDAK ADA DI FOTO"
-                                
-                            hasil_validasi.append({
-                                "Lokasi Madrasah": lokasi_sekarang,
-                                "Item Pekerjaan": uraian,
-                                "Progres": f"+{b_ini}%",
-                                "Status Bukti": status
+                            if not found_loc:
+                                status = "❌ DITOLAK"
+                                catatan = f"Nama Madrasah ({lokasi_aktif}) TIDAK ADA di laporan foto."
+                            elif not found_bldg:
+                                status = "❌ DITOLAK"
+                                catatan = f"Klaim {bldg} TIDAK ADA bukti fotonya."
+
+                            results_audit.append({
+                                "Madrasah": lokasi_aktif,
+                                "Pekerjaan": uraian,
+                                "Bobot": f"+{b_ini}%",
+                                "Status": status,
+                                "Penjelasan Analitik": catatan
                             })
                     except: continue
 
     # ==========================================
-    # 5. TAMPILAN OUTPUT FINAL
+    # 5. DISPLAY OUTPUT KOMPREHENSIF
     # ==========================================
     
-    # Tabulasi Hasil
-    tab1, tab2 = st.tabs(["📊 Rapor Validasi Progres", "⚠️ Log Kesalahan Angka"])
+    # --- BAGIAN 1: EXECUTIVE SUMMARY ---
+    st.header("📊 Ringkasan Eksekutif Audit")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Item Diperiksa", len(results_audit))
+    c2.metric("Anomali Angka", len(anomali_matematika))
+    c3.metric("Item Tanpa Foto", len([x for x in results_audit if "❌" in x["Status"]]))
+
+    # --- BAGIAN 2: LOG VALIDASI DETAIL ---
+    st.header("🔍 Laporan Deteksi Progres vs Foto")
+    df_res = pd.DataFrame(results_audit)
+    def style_status(v):
+        return 'background-color: #ffcccc; color: #a94442' if "❌" in v else 'background-color: #dff0d8; color: #3c763d'
+    st.dataframe(df_res.style.applymap(style_status, subset=['Status']), use_container_width=True)
+
+    # --- BAGIAN 3: ANOMALI MATEMATIKA ---
+    if anomali_matematika:
+        st.header("⚠️ Temuan Kesalahan Hitung (Anomali Desimal)")
+        st.markdown('<div class="crit-alert">Sistem mendeteksi ketidaksesuaian antara Minggu Lalu + Minggu Ini dengan Total Kumulatif. Segera minta klarifikasi ke bagian administrasi.</div>', unsafe_allow_html=True)
+        st.table(pd.DataFrame(anomali_matematika))
+
+    # --- BAGIAN 4: FORENSIK VISUAL & METADATA ---
+    st.header("🖼️ Galeri Bukti Material & Resolusi")
+    if galeri_images:
+        cols = st.columns(4)
+        for i, img_data in enumerate(galeri_images[:20]): # Tampilkan 20 foto pertama
+            with cols[i % 4]:
+                st.image(img_data["img"], caption=f"Bukti {i+1} (Hal {img_data['hal']})", use_container_width=True)
+                st.caption(f"📏 Res: {img_data['res']}")
     
-    with tab1:
-        st.subheader("Kesesuaian Klaim Pekerjaan vs Laporan Visual")
-        if hasil_validasi:
-            df_v = pd.DataFrame(hasil_validasi)
-            def style_row(val):
-                color = '#ffcccc' if "❌" in val else '#ccffcc'
-                return f'background-color: {color}'
-            st.dataframe(df_v.style.applymap(style_row, subset=['Status Bukti']), use_container_width=True)
-        else:
-            st.info("Tidak ada penambahan progres minggu ini.")
-
-    with tab2:
-        st.subheader("Ketidaksesuaian Penjumlahan Bobot")
-        if anomali_angka:
-            st.error("Ditemukan kesalahan kalkulasi pada item berikut:")
-            st.table(pd.DataFrame(anomali_angka))
-        else:
-            st.success("Seluruh perhitungan bobot sinkron 100%.")
-
+    # --- BAGIAN 5: DRAF BERITA ACARA ---
+    st.header("📝 Draf Laporan Hasil Pemeriksaan")
+    status_final = "REVISI" if (anomali_matematika or "❌" in str(results_audit)) else "DISETUJUI"
+    ba_text = f"""
+    BERITA ACARA DESK AUDIT DOKUMEN
+    --------------------------------
+    TANGGAL: {datetime.now().strftime('%d %B %Y')}
+    PROYEK : REHABILITASI & RENOVASI MADRASAH PHTC
+    
+    1. HASIL PEMERIKSAAN MATEMATIS:
+       - {'Ditemukan ' + str(len(anomali_matematika)) + ' kesalahan kalkulasi bobot.' if anomali_matematika else 'Integritas angka 100% akurat.'}
+    
+    2. HASIL VERIFIKASI BUKTI VISUAL:
+       - Ditemukan {len([x for x in results_audit if "❌" in x["Status"]])} klaim pekerjaan yang tidak didukung foto dokumentasi yang sesuai.
+    
+    KESIMPULAN:
+    Berdasarkan hasil verifikasi sistem, dokumen laporan dinyatakan {status_final}.
+    """
+    st.code(ba_text, language="text")
+    st.download_button("📥 Download Draf Hasil Audit", ba_text, file_name="Hasil_Audit_PHTC.txt")
