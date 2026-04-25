@@ -4,102 +4,149 @@ import pandas as pd
 import fitz  # PyMuPDF
 import io
 from PIL import Image
+from datetime import datetime
 
-# 1. Konfigurasi Standar Presisi Tinggi (Mobile-Friendly)
-st.set_page_config(page_title="Desk Audit System", page_icon="⚖️", layout="centered")
-st.title("Sistem Audit Forensik Dokumen")
-st.caption("Verifikasi Matematis & Ekstraksi Bukti Material")
+# Konfigurasi Halaman (Optimasi Handphone)
+st.set_page_config(page_title="Audit Forensik PHTC", page_icon="⚖️", layout="wide")
+
+# Tema Profesional
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("🛡️ Sistem Audit Forensik & Verifikasi Material")
+st.caption("Standard Operational Protocol: Aurelius Vishvakarma Precision Logic")
 st.markdown("---")
 
-# 2. Modul Input (Unggah PDF)
-col1, col2 = st.columns(2)
-with col1:
-    file_mingguan = st.file_uploader("Unggah Laporan Mingguan (PDF)", type="pdf")
-with col2:
-    file_dokumentasi = st.file_uploader("Unggah Laporan Dokumentasi (PDF)", type="pdf")
+# 1. SIDEBAR & INPUT
+st.sidebar.header("Pusat Kendali Dokumen")
+file_mingguan = st.sidebar.file_uploader("1. Laporan Mingguan (PDF)", type="pdf")
+file_dokumentasi = st.sidebar.file_uploader("2. Laporan Dokumentasi (PDF)", type="pdf")
 
-# 3. Eksekusi Komputasi
-if st.button("Jalankan Audit Forensik", use_container_width=True):
-    if file_mingguan and file_dokumentasi:
+if not (file_mingguan and file_dokumentasi):
+    st.info("Silakan unggah kedua dokumen PDF melalui sidebar untuk memulai audit forensik.")
+    st.stop()
+
+# 2. EKSEKUSI AUDIT
+if st.sidebar.button("⚙️ JALANKAN AUDIT KOMPREHENSIF", use_container_width=True):
+    
+    # --- OUTPUT 1 & 4: LOG ANOMALI & VALIDASI SILANG ---
+    st.header("🔍 Hasil Audit & Validasi Silang")
+    
+    with st.spinner("Menganalisis integritas data matematis..."):
+        temuan_anomali = []
+        ringkasan_progres = []
         
-        # ==========================================
-        # TAHAP 1: AUDIT MATEMATIS (LAPORAN MINGGUAN)
-        # ==========================================
-        st.subheader("1. Log Anomali Kalkulasi Matematis")
-        with st.spinner("Membedah struktur tabel dan menghitung deviasi..."):
-            temuan_anomali = []
-            
-            with pdfplumber.open(file_mingguan) as pdf:
-                # Fokus pada halaman akhir (asumsi tabel Rincian Kemajuan Fisik ada di 5 halaman terakhir)
-                start_page = max(0, len(pdf.pages) - 5)
-                for i in range(start_page, len(pdf.pages)):
-                    tabel = pdf.pages[i].extract_table()
-                    if not tabel: continue
-                    
-                    for row in tabel:
-                        try:
-                            # Logika deterministik: Memeriksa baris yang memiliki format angka desimal
-                            if row[1] and row[5] and row[8] and row[11]:
-                                uraian = str(row[1]).replace('\n', ' ')
-                                bobot_lalu = float(str(row[5]).replace(',', '.'))
-                                bobot_ini = float(str(row[8]).replace(',', '.'))
-                                klaim_kumulatif = float(str(row[11]).replace(',', '.'))
-                                
-                                # Mesin menghitung kebenaran mutlak
-                                hitungan_mesin = round(bobot_lalu + bobot_ini, 3)
-                                
-                                if hitungan_mesin != round(klaim_kumulatif, 3):
-                                    temuan_anomali.append({
-                                        "Pekerjaan": uraian,
-                                        "Klaim Laporan": klaim_kumulatif,
-                                        "Hitungan Sistem": hitungan_mesin,
-                                        "Selisih": round(klaim_kumulatif - hitungan_mesin, 3)
-                                    })
-                        except:
-                            continue # Abaikan header tabel
-            
-            # Menampilkan hasil audit matematis
-            if len(temuan_anomali) > 0:
-                st.error(f"Ditemukan {len(temuan_anomali)} anomali perhitungan!")
-                df_anomali = pd.DataFrame(temuan_anomali)
-                st.dataframe(df_anomali, use_container_width=True)
-            else:
-                st.success("Verifikasi Matematis: AMAN (Presisi 100%)")
-
-        st.markdown("---")
-
-        # ==========================================
-        # TAHAP 2: AUDIT VISUAL (LAPORAN DOKUMENTASI)
-        # ==========================================
-        st.subheader("2. Matriks Bukti Material (Resolusi Asli)")
-        with st.spinner("Mengekstrak bukti foto dari kompresi PDF..."):
-            pdf_dokumen = fitz.open(stream=file_dokumentasi.read(), filetype="pdf")
-            
-            # Grid visual untuk layar HP
-            kolom_foto = st.columns(2)
-            idx_kolom = 0
-            total_foto = 0
-            
-            for nomor_halaman in range(len(pdf_dokumen)):
-                daftar_gambar = pdf_dokumen[nomor_halaman].get_images(full=True)
+        with pdfplumber.open(file_mingguan) as pdf:
+            # Iterasi halaman lampiran kemajuan fisik (biasanya di paruh kedua PDF)
+            for i in range(len(pdf.pages)):
+                tabel = pdf.pages[i].extract_table()
+                if not tabel: continue
                 
-                for img in daftar_gambar:
-                    xref = img[0]
-                    base_image = pdf_dokumen.extract_image(xref)
-                    byte_gambar = base_image["image"]
-                    
-                    # Cek dimensi foto asli
-                    image_pil = Image.open(io.BytesIO(byte_gambar))
-                    lebar, tinggi = image_pil.size
-                    
-                    # Menampilkan ke dasbor jika resolusi masuk akal (bukan sekadar icon/logo)
-                    if lebar > 100 and tinggi > 100:
-                        total_foto += 1
-                        with kolom_foto[idx_kolom % 2]:
-                            st.image(image_pil, caption=f"Hal {nomor_halaman + 1} | {lebar}x{tinggi} px")
-                        idx_kolom += 1
+                for row in tabel:
+                    try:
+                        # Mendeteksi baris pekerjaan berdasarkan pola kolom (Volume/Bobot)
+                        if row[1] and row[5] and row[8] and row[11]:
+                            uraian = str(row[1]).replace('\n', ' ')
+                            b_lalu = float(str(row[5]).replace(',', '.'))
+                            b_ini = float(str(row[8]).replace(',', '.'))
+                            klaim_total = float(str(row[11]).replace(',', '.'))
+                            
+                            hitungan_sistem = round(b_lalu + b_ini, 3)
+                            deviasi = round(klaim_total - hitungan_sistem, 3)
+                            
+                            # Simpan untuk ringkasan
+                            ringkasan_progres.append({"Pekerjaan": uraian, "Bobot": b_ini})
+                            
+                            if abs(deviasi) > 0.001:
+                                temuan_anomali.append({
+                                    "Item Pekerjaan": uraian,
+                                    "Klaim Laporan": f"{klaim_total}%",
+                                    "Hitungan Sistem": f"{hitungan_sistem}%",
+                                    "Selisih desimal": deviasi
+                                })
+                    except: continue
 
-            st.info(f"Total bukti material terekstrak: {total_foto} foto.")
-
+    # Tampilkan Anomali (Output 1)
+    if temuan_anomali:
+        st.error(f"🚩 Ditemukan {len(temuan_anomali)} Ketidaksesuaian Perhitungan desimal!")
+        st.table(pd.DataFrame(temuan_anomali))
     else:
-        st.warning("Unggah kedua dokumen PDF terlebih dahulu untuk memulai prosedur audit.")
+        st.success("✅ Integritas Matematis: Sempurna (Tidak ditemukan deviasi angka).")
+
+    st.markdown("---")
+
+    # --- OUTPUT 2 & 3: MATRIKS KOMPARASI & METADATA ---
+    st.header("🖼️ Analisis Forensik Bukti Material")
+    
+    with st.spinner("Mengekstrak bukti foto dan metadata asli..."):
+        doc_foto = fitz.open(stream=file_dokumentasi.read(), filetype="pdf")
+        total_img = 0
+        metadata_report = []
+        
+        # Grid Foto (Output 2)
+        cols = st.columns(2)
+        
+        for p_idx in range(len(doc_foto)):
+            page = doc_foto[p_idx]
+            img_list = page.get_images(full=True)
+            
+            for i_idx, img in enumerate(img_list):
+                xref = img[0]
+                base_img = doc_foto.extract_image(xref)
+                img_bytes = base_img["image"]
+                img_ext = base_img["ext"]
+                
+                # Render Foto
+                image = Image.open(io.BytesIO(img_bytes))
+                w, h = image.size
+                
+                if w > 150: # Filter logo/icon
+                    total_img += 1
+                    with cols[total_img % 2]:
+                        st.image(image, caption=f"Bukti {total_img} (Hal {p_idx+1})", use_container_width=True)
+                    
+                    # Metadata Audit (Output 3)
+                    metadata_report.append({
+                        "ID Bukti": f"IMG_{total_img}",
+                        "Sumber": f"Halaman {p_idx+1}",
+                        "Dimensi Asli": f"{w}x{h} px",
+                        "Format": img_ext.upper(),
+                        "Indikasi": "Valid" if w > 500 else "Resolusi Rendah (Risiko Kompresi)"
+                    })
+
+    st.subheader("📋 Laporan Audit Metadata & Resolusi")
+    st.dataframe(pd.DataFrame(metadata_report), use_container_width=True)
+
+    st.markdown("---")
+
+    # --- OUTPUT 5: DRAF BERITA ACARA TEMUAN ---
+    st.header("📝 Draf Nota Dinas / Berita Acara Temuan")
+    
+    # Logika Rangkuman Eksekutif
+    status_audit = "DITOLAK/REVISI" if temuan_anomali else "DISETUJUI"
+    
+    ba_text = f"""
+    BERITA ACARA PEMERIKSAAN DOKUMEN (DESK AUDIT)
+    -------------------------------------------
+    PROYEK: REHABILITASI DAN RENOVASI MADRASAH PHTC KALSEL 6
+    TANGGAL AUDIT: {datetime.now().strftime('%d-%m-%Y')}
+    
+    HASIL PEMERIKSAAN:
+    1. Integritas Angka: {'Ditemukan Anomali desimal' if temuan_anomali else 'Valid'}
+    2. Ketersediaan Bukti Fisik: Ditemukan {total_img} foto dokumentasi terekstrak.
+    
+    KESIMPULAN:
+    Berdasarkan hasil audit sistem, laporan ini dinyatakan {status_audit} 
+    untuk diproses ke tahap administrasi selanjutnya.
+    
+    CATATAN:
+    - {f'Perbaiki selisih angka pada {len(temuan_anomali)} item pekerjaan.' if temuan_anomali else 'Dokumen konsisten secara matematis.'}
+    - Pastikan foto resolusi rendah pada laporan visual diganti dengan file asli.
+    """
+    st.code(ba_text, language="text")
+    st.download_button("📥 Unduh Draf Temuan Audit", ba_text, file_name="Draf_Temuan_Audit.txt")
+
