@@ -1,3 +1,5 @@
 streamlit
 pdfplumber
-PyMuPDF
+fuzzywuzzy
+python-Levenshtein
+pandas
