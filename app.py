@@ -14,9 +14,9 @@ st.set_page_config(page_title="Audit Forensik PHTC", page_icon="⚖️", layout=
 
 st.markdown('''
     <style>
-   .main { background-color: #f0f2f6; }
-   .alert-danger { background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; font-weight: bold; border-left: 5px solid #dc3545;}
-   .alert-success { background-color: #d4edda; color: #155724; padding: 10px; border-radius: 5px; font-weight: bold; border-left: 5px solid #28a745;}
+  .main { background-color: #f0f2f6; }
+  .alert-danger { background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; border-left: 5px solid #dc3545;}
+  .alert-success { background-color: #d4edda; color: #155724; padding: 10px; border-radius: 5px; border-left: 5px solid #28a745;}
     </style>
     ''', unsafe_allow_html=True)
 
@@ -80,8 +80,8 @@ if not (file_mingguan and file_foto):
 if eksekusi:
     
     # Variabel Penyimpanan Data Tahap 1
-    pekerjaan_valid_matematika = list() # Rangkuman progress yang lolos uji angka
-    log_anomali_matematika = list()     # Rangkuman progress dengan angka manipulatif
+    pekerjaan_valid_matematika = list() 
+    log_anomali_matematika = list()     
     lokasi_saat_ini = "LOKASI_TIDAK_DIKETAHUI"
 
     # ------------------------------------------------------------------
@@ -98,7 +98,9 @@ if eksekusi:
                     if not teks_halaman or "KEMAJUAN FISIK" not in teks_halaman.upper():
                         continue
                     
-                    tabel = page.extract_table({"vertical_strategy": "lines", "horizontal_strategy": "lines"})
+                    aturan_tabel = dict(vertical_strategy="lines", horizontal_strategy="lines")
+                    tabel = page.extract_table(aturan_tabel)
+                    
                     if not tabel: 
                         tabel = page.extract_table()
                     if not tabel: continue
@@ -106,7 +108,7 @@ if eksekusi:
                     for row in tabel:
                         if len(row) < 12: continue
                         
-                        # Ambil uraian pekerjaan dengan aman tanpa kurung siku kosong
+                        # Ambil uraian pekerjaan dengan getter absolut menghindari error indexing
                         uraian = str(row.__getitem__(1)).replace('\n', ' ').strip()
                         if not uraian or uraian.lower() in ('none', '', 'nan'): continue
 
@@ -256,11 +258,13 @@ if eksekusi:
             return 'background-color: #dff0d8; color: #3c763d'
         return ''
 
-    # Gunakan map secara aman untuk pandas dataframe styler
+    # Gunakan map secara aman untuk pandas dataframe styler dengan string langsung
+    kolom_target_warna = "Status Pembuktian"
+    
     try:
-        styled_df = df_hasil_akhir.style.map(pewarnaan_status, subset="Status Pembuktian")
-    except:
-        styled_df = df_hasil_akhir.style.applymap(pewarnaan_status, subset=)
+        styled_df = df_hasil_akhir.style.map(pewarnaan_status, subset=kolom_target_warna)
+    except AttributeError:
+        styled_df = df_hasil_akhir.style.applymap(pewarnaan_status, subset=kolom_target_warna)
 
     st.dataframe(styled_df, use_container_width=True)
 
