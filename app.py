@@ -60,7 +60,7 @@ with col2:
     file_dokumentasi = st.file_uploader("Unggah PDF Foto", type=["pdf"], key="dokumentasi")
 
 # ==========================================
-# 4. MESIN EKSTRAKSI VISION AI (FLEXIBLE PARSER)
+# 4. MESIN EKSTRAKSI VISION AI (FLEXIBLE & BULLETPROOF PARSER)
 # ==========================================
 def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
     status_placeholder = st.empty()
@@ -103,8 +103,16 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
         status_placeholder.info(f"⏳ Mengeksekusi {tipe_dokumen} halaman {i+1}/{len(images)}...")
         try:
             response = model.generate_content([prompt, img])
-            # Membersihkan Markdown dan menarik JSON (Baris ini sudah diperbaiki secara absolut)
-            clean_text = re.sub(r'match = re.search(r'\[.*\]', clean_text, re.DOTALL)
+            
+            # METODE PEMBERSIHAN ABSOLUT (ANTI COPY-PASTE ERROR)
+            clean_text = response.text
+            clean_text = clean_text.replace("```json", "")
+            clean_text = clean_text.replace("```", "")
+            clean_text = clean_text.strip()
+            
+            # Menarik JSON secara aman
+            match = re.search(r'\[.*\]', clean_text, re.DOTALL)
+            
             if match:
                 data = json.loads(match.group(0))
                 results.extend(data)
