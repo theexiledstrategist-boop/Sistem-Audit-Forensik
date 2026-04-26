@@ -5,195 +5,144 @@ from fuzzywuzzy import fuzz, process
 import pytesseract
 from pdf2image import convert_from_bytes
 import io
-import re
 
 # ==========================================
 # 1. KONFIGURASI ANTARMUKA (UI)
 # ==========================================
-st.set_page_config(page_title="Audit Forensik Proyek V2", page_icon="⚖️", layout="wide")
+st.set_page_config(page_title="Audit Forensik Proyek V3", page_icon="⚖️", layout="wide")
 
 st.title("⚖️ Sistem Audit Forensik & Verifikator Progress")
-st.markdown("""
-**Standard Operating Procedure (SOP):** Mesin verifikasi ini mensinkronkan klaim pada Laporan Mingguan dengan bukti fisik di Laporan Dokumentasi. Sistem dirancang untuk mengeleminasi risiko administratif dengan presisi tinggi.
-""")
+st.markdown("Fokus pada validasi eksistensi fisik di lapangan. Hindari bias OCR pada tabel matematis.")
 st.markdown("---")
 
 # ==========================================
-# 2. MODUL UPLOAD FILE
+# 2. INPUT OTORITAS PPK & UPLOAD FILE
 # ==========================================
+st.sidebar.header("⚙️ Parameter Kontrak")
+klaim_progress_total = st.sidebar.number_input("Klaim Progress Minggu Ini (%)", min_value=0.000, max_value=100.000, value=2.919, step=0.001, format="%.3f")
+st.sidebar.caption("Input angka klaim dari halaman depan laporan mingguan (Bukan Kumulatif).")
+
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("📄 Data 1: Laporan Mingguan")
-    file_mingguan = st.file_uploader("Unggah Laporan Mingguan (PDF Scan/Teks)", type=["pdf"], key="mingguan")
+    file_mingguan = st.file_uploader("Unggah Laporan Mingguan", type=["pdf"], key="mingguan")
 
 with col2:
     st.subheader("📸 Data 2: Laporan Dokumentasi")
-    file_dokumentasi = st.file_uploader("Unggah Laporan Dokumentasi (PDF Scan)", type=["pdf"], key="dokumentasi")
+    file_dokumentasi = st.file_uploader("Unggah Laporan Dokumentasi", type=["pdf"], key="dokumentasi")
 
 # ==========================================
-# 3. MESIN EKSTRAKSI OCR & TABLE PARSING
+# 3. MESIN EKSTRAKSI OCR
 # ==========================================
 def ekstrak_data_forensik(file_pdf, nama_file):
-    """
-    Ekstraksi dua lapis: Mencoba lapis teks standar (pdfplumber) terlebih dahulu.
-    Jika gagal atau terdeteksi sebagai scan murni, mesin OCR (Tesseract) diaktifkan.
-    """
     teks_lengkap = ""
     file_bytes = file_pdf.read()
     
-    # FASE 1: Uji Ekstraksi Teks Standar
     try:
-        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages:
-                teks = page.extract_text(x_tolerance=2, y_tolerance=2)
-                if teks:
-                    teks_lengkap += teks + "\n"
-    except Exception:
-        pass
-
-    # FASE 2: Penetrasi OCR jika teks kosong
-    if len(teks_lengkap.strip()) < 50:
-        st.warning(f"⚠️ [{nama_file}] Menginisiasi Mesin OCR untuk membedah dokumen scan...")
-        try:
-            images = convert_from_bytes(file_bytes)
-            for i, img in enumerate(images):
-                page_text = pytesseract.image_to_string(img, lang='ind')
-                teks_lengkap += f"\n[HALAMAN_{i+1}]\n" + page_text
-        except Exception as e:
-            st.error(f"[FATAL ERROR] Kegagalan mesin OCR pada {nama_file}. Pastikan file packages.txt terkonfigurasi di server. Detail: {e}")
-            return []
+        images = convert_from_bytes(file_bytes)
+        for i, img in enumerate(images):
+            page_text = pytesseract.image_to_string(img, lang='ind')
+            teks_lengkap += f"\n[HALAMAN_{i+1}]\n" + page_text
+    except Exception as e:
+        st.error(f"Gagal mengekstrak {nama_file}: {e}")
+        return []
             
-    baris_teks = [baris.strip() for baris in teks_lengkap.split('\n') if len(baris.strip()) > 5]
+    baris_teks = [baris.strip() for baris in teks_lengkap.split('\n') if len(baris.strip()) > 10]
     return baris_teks
 
-def parse_detailed_claims(baris_teks):
-    """
-    Membedah baris teks untuk mencari: Lokasi, Uraian Pekerjaan, dan Bobot Progress (%).
-    """
+def parse_item_pekerjaan(baris_teks):
+    """Fokus HANYA menarik deskripsi pekerjaan, abaikan angka persentase."""
     items = []
-    current_lokasi = "Lokasi Umum / Tidak Terdeteksi"
-    
-    # Kata kunci forensik untuk mengidentifikasi baris pekerjaan
-    keywords_pekerjaan = ["pekerjaan", "pasang", "cor", "fabrikasi", "bekisting", "atap", "keramik", "pondasi"]
+    current_lokasi = "Lokasi Tidak Spesifik"
+    keywords = ["pekerjaan", "pasang", "cor", "fabrikasi", "bekisting", "atap", "keramik", "pondasi"]
     
     for baris in baris_teks:
-        # Identifikasi Lokasi Spesifik
         if any(x in baris.upper() for x in ["MIS ", "MTSS "]):
             current_lokasi = baris
             
-        # Identifikasi Uraian Pekerjaan
-        if any(k in baris.lower() for k in keywords_pekerjaan):
-            # Regex untuk menangkap angka desimal progres (misal: 2.45 atau 0,12)
-            match_percent = re.findall(r"(\d+[.,]\d+)", baris)
+        if any(k in baris.lower() for k in keywords):
+            # Membersihkan angka dan karakter aneh di akhir baris akibat OCR tabel
+            baris_bersih = ''.join([i for i in baris if not i.isdigit()]).replace('.', '').replace(',', '').strip()
             
-            # Mengambil angka desimal terakhir di baris tersebut sebagai asumsi progress minggu ini
-            if match_percent:
-                progres_str = match_percent[-1].replace(',', '.')
-                try:
-                    progres = float(progres_str)
-                except ValueError:
-                    progres = 0.0
-            else:
-                progres = 0.0
-            
-            # Memastikan baris cukup panjang untuk disebut sebuah uraian kalimat
-            if len(baris) > 15:
+            if len(baris_bersih) > 15:
                 items.append({
                     "lokasi": current_lokasi,
-                    "pekerjaan": baris,
-                    "progres_klaim": progres
+                    "pekerjaan": baris_bersih
                 })
     return items
 
 # ==========================================
-# 4. EKSEKUSI AUDIT & GENERASI NARASI
+# 4. EKSEKUSI AUDIT
 # ==========================================
 if file_mingguan and file_dokumentasi:
     st.markdown("---")
     if st.button("🚀 JALANKAN AUDIT FORENSIK", use_container_width=True):
-        with st.spinner('Menjalankan algoritma pembedahan dan korelasi silang...'):
+        with st.spinner('Menyinkronkan data teks dengan metadata visual...'):
             
-            # Eksekusi Ekstraksi
             raw_mingguan = ekstrak_data_forensik(file_mingguan, "Laporan Mingguan")
             raw_dokumentasi = ekstrak_data_forensik(file_dokumentasi, "Laporan Dokumentasi")
             
-            klaim_items = parse_detailed_claims(raw_mingguan)
+            klaim_items = parse_item_pekerjaan(raw_mingguan)
             
             if klaim_items:
-                st.subheader("📊 Matriks Verifikasi & Kalkulasi Lapangan")
+                st.subheader("📊 Matriks Verifikasi Visual")
                 
                 audit_results = []
-                total_klaim = 0.0
-                total_ditolak = 0.0
-                strictness = 75 # Presisi kemiripan semantik
+                item_ditolak = 0
+                total_item = len(klaim_items)
+                strictness = 75
                 
                 for item in klaim_items:
-                    # Proses Fuzzy Matching (Pencocokan Semantik)
                     best_match, score = process.extractOne(item['pekerjaan'], raw_dokumentasi, scorer=fuzz.token_set_ratio)
-                    
                     status = "✅ SINKRON" if score >= strictness else "❌ TIDAK SINKRON"
                     
-                    # Logika Kalkulasi Pemotongan
                     if status == "❌ TIDAK SINKRON":
-                        total_ditolak += item['progres_klaim']
-                    
-                    total_klaim += item['progres_klaim']
-                    
+                        item_ditolak += 1
+                        
                     audit_results.append({
                         "Lokasi": item['lokasi'],
                         "Uraian Pekerjaan": item['pekerjaan'],
-                        "Klaim (%)": item['progres_klaim'],
                         "Status": status,
-                        "Bukti Visual": best_match if score >= strictness else "Nihil / Celah Ditemukan",
-                        "Akurasi": f"{score}%"
+                        "Bukti Visual": best_match if score >= strictness else "Tidak Ada Bukti",
                     })
                 
                 df = pd.DataFrame(audit_results)
                 
-                # Render Tabel dengan Sabuk Pengaman Versi Pandas (Menghindari AttributeError)
                 try:
                     st.dataframe(df.style.map(lambda x: 'color: red; font-weight: bold' if x == "❌ TIDAK SINKRON" else '', subset=['Status']), use_container_width=True)
                 except AttributeError:
                     st.dataframe(df.style.applymap(lambda x: 'color: red; font-weight: bold' if x == "❌ TIDAK SINKRON" else '', subset=['Status']), use_container_width=True)
                 
                 # ==========================================
-                # 5. KEPUTUSAN FINAL & NARASI ADMINISTRATIF
+                # 5. KEPUTUSAN FINAL BERBASIS RISIKO
                 # ==========================================
-                total_diterima = total_klaim - total_ditolak
+                persentase_ditolak = (item_ditolak / total_item) * 100 if total_item > 0 else 0
+                estimasi_potongan = (persentase_ditolak / 100) * klaim_progress_total
+                estimasi_diterima = klaim_progress_total - estimasi_potongan
                 
                 st.markdown("---")
-                st.header("📝 Narasi Keputusan Eksekusi")
+                st.header("📝 Narasi Keputusan Administratif")
                 
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Total Progress Diklaim", f"{total_klaim:.3f}%")
-                c2.metric("Progress Ditolak (Red Flag)", f"-{total_ditolak:.3f}%", delta_color="inverse")
-                c3.metric("Total Real Progress Diterima", f"{total_diterima:.3f}%")
+                c1.metric("Total Item Diklaim", f"{total_item} Pekerjaan")
+                c2.metric("Item Tanpa Bukti (Red Flag)", f"{item_ditolak} Pekerjaan", delta_color="inverse")
+                c3.metric("Rasio Validitas Visual", f"{(100 - persentase_ditolak):.1f}%")
 
-                # Ekstraksi Lokasi Bermasalah
                 lokasi_bermasalah = df[df['Status'] == '❌ TIDAK SINKRON']['Lokasi'].unique().tolist()
                 teks_lokasi = ", ".join(lokasi_bermasalah) if lokasi_bermasalah else "Tidak ada"
 
-                st.info(f"""
-                **HASIL AUDIT FORENSIK:**
-                Berdasarkan komparasi data antara dokumen tertulis dan dokumentasi visual, ditemukan bahwa dari total klaim progress sebesar **{total_klaim:.3f}%**, terdapat **{total_ditolak:.3f}%** pekerjaan yang gagal dibuktikan keberadaannya di lapangan (Red Flag).
+                st.warning(f"""
+                **LAPORAN EVALUASI PPK:**
+                Pihak kontraktor mengajukan klaim progres minggu ini sebesar **{klaim_progress_total:.3f}%**. Namun, dari total **{total_item}** item pekerjaan yang tertulis, terdapat **{item_ditolak}** item pekerjaan (sekitar {persentase_ditolak:.1f}% dari total aktivitas) yang tidak memiliki bukti dokumentasi visual yang dapat dipertanggungjawabkan.
                 
-                **LOKASI TERINDIKASI DEVIASI DATA:**
-                Ketidaksesuaian administrasi dan visual ditemukan secara spesifik pada lokasi: **{teks_lokasi}**.
+                **LOKASI KRITIS:**
+                Pekerjaan fiktif/tidak terdokumentasi ini berpusat di: **{teks_lokasi}**.
                 
-                **TINDAKAN ADMINISTRATIF:**
-                Direkomendasikan untuk menolak persetujuan penuh. Laporan hanya dapat disetujui untuk nilai real progress sebesar **{total_diterima:.3f}%**. Sisa klaim ditangguhkan hingga kontraktor pelaksana dapat menyajikan bukti fisik empiris yang memenuhi standar.
+                **REKOMENDASI PENOLAKAN:**
+                Mengingat integritas data yang cacat, direkomendasikan untuk menahan klaim progres sebesar estimasi rasio deviasi visual, yaitu **{estimasi_potongan:.3f}%**. Nilai progres aman yang dapat disetujui sementara waktu sebelum opname lapangan dilakukan adalah **{estimasi_diterima:.3f}%**.
                 """)
-                
-                # Radar Diagnostik Teks Mentah (Untuk pengawasan tambahan)
-                with st.expander("🛠️ Radar Diagnostik OCR: Inspeksi Teks Mentah Laporan"):
-                    st.write("**Data Ekstraksi Laporan Mingguan:**")
-                    st.text("\n".join(raw_mingguan[:50])) 
-
             else:
-                st.error("Mesin tidak dapat mengekstrak pola pekerjaan dan persentase. Pastikan resolusi scan PDF cukup tajam untuk dibaca oleh OCR.")
+                st.error("Gagal mengekstrak teks. Pastikan dokumen dapat dibaca OCR.")
 
 elif not file_mingguan or not file_dokumentasi:
-    st.info("Sistem dalam status Stand By. Silakan unggah Laporan Mingguan dan Dokumentasi untuk memulai.")
-
-st.markdown("---")
-st.caption("Sistem dirancang dengan pendekatan utilitaritarian dan presisi absolut. Keputusan akhir tetap berada pada otoritas pejabat berwenang.")
+    st.info("Sistem dalam status Stand By.")
