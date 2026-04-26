@@ -2,6 +2,9 @@ import streamlit as st
 import pdfplumber
 import pandas as pd
 from fuzzywuzzy import fuzz, process
+import pytesseract
+from pdf2image import convert_from_bytes
+import io
 
 # ==========================================
 # 1. KONFIGURASI ANTARMUKA (UI)
@@ -9,7 +12,7 @@ from fuzzywuzzy import fuzz, process
 st.set_page_config(page_title="Audit Forensik Proyek", page_icon="🔬", layout="wide")
 
 st.title("🔬 Sistem Audit Forensik: Teks vs Visual")
-st.markdown("Alat evaluasi presisi tinggi untuk menyinkronkan klaim Laporan Mingguan dengan Laporan Dokumentasi.")
+st.markdown("Mesin evaluasi presisi tinggi dengan integrasi **OCR** untuk membaca laporan hasil scan.")
 st.markdown("---")
 
 # ==========================================
@@ -27,20 +30,34 @@ with col2:
 # ==========================================
 # 3. MESIN EKSTRAKSI & AUDIT (BACKEND)
 # ==========================================
-def ekstrak_teks_pdf(file_pdf):
-    """Mengekstrak teks kasar dari PDF dengan toleransi spasi tabel."""
+def ekstrak_teks_pdf(file_pdf, nama_file):
+    """Mengekstrak teks dengan Fallback OCR jika PDF berupa Scan."""
     teks_lengkap = ""
+    file_bytes = file_pdf.read()
+    
+    # FASE 1: Ekstraksi Standar
     try:
-        with pdfplumber.open(file_pdf) as pdf:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                # Menggunakan layout=True untuk menjaga struktur tabel
                 teks = page.extract_text(x_tolerance=2, y_tolerance=2)
                 if teks:
                     teks_lengkap += teks + "\n"
-    except Exception as e:
-        st.error(f"Gagal membaca PDF: {e}")
-        return []
-        
+    except Exception:
+        pass
+
+    # FASE 2: Aktivasi OCR (Jika Teks Kosong/Scan Murni)
+    if len(teks_lengkap.strip()) < 50:
+        st.warning(f"⚠️ [{nama_file}] Terdeteksi sebagai PDF Scan. Mengaktifkan mesin OCR... (Proses ini memakan waktu beberapa menit).")
+        try:
+            # Mengubah PDF menjadi deretan gambar
+            images = convert_from_bytes(file_bytes)
+            for i, img in enumerate(images):
+                # Membaca teks dari gambar dengan Tesseract (Bahasa Indonesia)
+                teks_lengkap += pytesseract.image_to_string(img, lang='ind') + "\n"
+        except Exception as e:
+            st.error(f"FATAL ERROR pada OCR: {e}. Pastikan file packages.txt sudah dibuat di GitHub.")
+            return []
+            
     baris_teks = [baris.strip() for baris in teks_lengkap.split('\n') if len(baris.strip()) > 4]
     return baris_teks
 
@@ -48,27 +65,24 @@ def ekstrak_teks_pdf(file_pdf):
 if file_mingguan and file_dokumentasi:
     st.markdown("---")
     if st.button("🚀 EKSEKUSI AUDIT FORENSIK", use_container_width=True):
-        with st.spinner('Membedah struktur data... Stand by.'):
+        with st.spinner('Menjalankan ekstraksi dan korelasi tingkat tinggi...'):
             
-            # Ekstraksi Teks
-            teks_klaim = ekstrak_teks_pdf(file_mingguan)
-            teks_bukti = ekstrak_teks_pdf(file_dokumentasi)
+            # Ekstraksi Teks dengan OCR
+            teks_klaim = ekstrak_teks_pdf(file_mingguan, "Laporan Mingguan")
+            teks_bukti = ekstrak_teks_pdf(file_dokumentasi, "Laporan Dokumentasi")
             
             # Kata kunci ekstraksi (Case Insensitive)
             keywords = ["pekerjaan", "pasang", "cor", "bekisting", "fabrikasi", "atap", "keramik", "instalasi"]
-            
-            # Filter klaim: cari baris yang mengandung salah satu kata kunci di atas
             klaim_pekerjaan = [t for t in teks_klaim if any(k in t.lower() for k in keywords)]
             
             st.subheader("📊 Hasil Audit Korelasi Silang")
             
             if klaim_pekerjaan:
                 audit_log = []
-                strictness = 75 # Presisi tinggi
+                strictness = 75 # Toleransi Forensik
                 
                 for klaim in klaim_pekerjaan:
-                    # Lewati baris yang terlalu pendek atau sekadar header tabel
-                    if len(klaim) < 15:
+                    if len(klaim) < 15: # Mengabaikan frasa yang terlalu pendek
                         continue
                         
                     best_match, score = process.extractOne(klaim, teks_bukti, scorer=fuzz.token_set_ratio)
@@ -80,7 +94,6 @@ if file_mingguan and file_dokumentasi:
 
                 if audit_log:
                     df_hasil = pd.DataFrame(audit_log)
-                    
                     df_gagal = df_hasil[df_hasil["Status"] == "❌ RED FLAG (TIDAK SINKRON)"]
                     df_lolos = df_hasil[df_hasil["Status"] == "✅ TERVERIFIKASI"]
                     
@@ -94,10 +107,8 @@ if file_mingguan and file_dokumentasi:
                         with st.expander(f"Lihat {len(df_lolos)} Klaim Terverifikasi"):
                             st.dataframe(df_lolos, use_container_width=True)
             else:
-                st.error("Sistem gagal mengekstrak frasa pekerjaan. Kemungkinan PDF berupa hasil Scan (Gambar) murni tanpa teks yang bisa diblok, atau format tabel terlalu terpecah.")
+                st.error("Sistem tetap gagal menemukan frasa. Kualitas resolusi scan mungkin terlalu rendah untuk dibaca oleh mesin OCR.")
                 
-                # Radar Diagnostik: Menampilkan apa yang sebenarnya dilihat mesin
-                with st.expander("🛠️ Radar Diagnostik: Lihat Teks Mentah yang Terbaca Mesin"):
-                    st.write("**Isi Teks Laporan Mingguan yang Terbaca:**")
-                    st.write(teks_klaim[:30] if teks_klaim else "KOSONG/GAGAL BACA")
-
+                with st.expander("🛠️ Radar Diagnostik OCR: Lihat Teks Mentah"):
+                    st.write("**Hasil Ekstraksi OCR Laporan Mingguan:**")
+                    st.write(teks_klaim[:50] if teks_klaim else "KOSONG/GAGAL BACA")
