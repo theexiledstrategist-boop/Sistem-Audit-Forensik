@@ -19,8 +19,8 @@ except KeyError:
     st.error("FATAL ERROR: API Key belum dikonfigurasi di Streamlit Secrets.")
     st.stop()
 
-st.title("🛡️ Sistem Evaluasi Laporan PPSPM (Diagnostic Edition)")
-st.markdown("Audit forensik aktif dengan transparansi log penuh. Memastikan tidak ada kegagalan buta tanpa penjelasan.")
+st.title("🛡️ Sistem Evaluasi Laporan PPSPM (Absolute Precision)")
+st.markdown("Audit forensik aktif. Memastikan pemotongan tagihan didasarkan pada perhitungan matematis yang sah secara hukum, beroperasi dengan ritme aman (Anti-Blokir 429).")
 st.markdown("---")
 
 # ==========================================
@@ -60,11 +60,11 @@ with col2:
     file_dokumentasi = st.file_uploader("Unggah PDF Foto", type=["pdf"], key="dokumentasi")
 
 # ==========================================
-# 4. MESIN EKSTRAKSI VISION AI (DENGAN REKAM MEDIS)
+# 4. MESIN EKSTRAKSI VISION AI (ANTI-BLOKIR & REKAM MEDIS)
 # ==========================================
 def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
     status_placeholder = st.empty()
-    log_diagnostik = [] # Sistem perekam jejak absolut
+    log_diagnostik = [] 
     results = []
     
     try:
@@ -78,42 +78,44 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
     
     if tipe_dokumen == "mingguan":
         prompt = """
-        Anda adalah auditor sipil yang presisi. Baca tabel laporan proyek ini.
-        Ekstrak HANYA daftar pekerjaan yang MENGALAMI KEMAJUAN (ada angka progresnya).
+        Anda adalah auditor forensik. Bedah gambar tabel ini.
+        Tugas Anda adalah mengekstrak daftar rincian pekerjaan konstruksi.
         
-        Keluarkan WAJIB dalam format JSON Array murni seperti ini:
-        [{"lokasi": "NAMA MADRASAH", "pekerjaan": "Uraian pekerjaan...", "progres": 2.45}]
+        Aturan Ekstraksi:
+        1. "lokasi": Nama madrasah/lokasi (jika tidak ada, isi "TIDAK SPESIFIK").
+        2. "pekerjaan": Deskripsi pekerjaan (perbaiki ejaan jika buram).
+        3. "progres": Cari angka kemajuan fisik/bobot persentase TERBARU atau MINGGU INI. Jika bentuknya desimal koma (misal 2,45), ubah wajib jadi titik (2.45). Jika kolom progres kosong/tidak terbaca, WAJIB isi 0.0.
         
-        Aturan:
-        - "progres" harus berupa angka desimal titik (float). Jika kosong, isi 0.0.
-        - Jangan berikan penjelasan teks apa pun. Hanya JSON Array.
-        - Jika halaman ini tidak berisi tabel, kembalikan: []
+        Keluarkan HANYA dalam format array JSON murni tanpa teks awalan/akhiran apa pun:
+        [
+          {"lokasi": "MIS ALAM", "pekerjaan": "Pasang Bata", "progres": 1.25},
+          {"lokasi": "MIS ALAM", "pekerjaan": "Plesteran", "progres": 0.0}
+        ]
+        
+        WAJIB kembalikan array JSON. Jangan pernah kembalikan array kosong [] jika ada teks pekerjaan di halaman ini.
         """
     else:
         prompt = """
-        Ekstrak teks keterangan (caption) yang menjelaskan foto proyek ini.
-        Keluarkan WAJIB dalam format JSON Array murni:
-        [{"caption": "Teks keterangan foto"}]
-        Jika tidak ada keterangan foto yang relevan, kembalikan: []
+        Ekstrak semua keterangan teks (caption) yang ada pada foto dokumentasi ini.
+        Keluarkan HANYA format array JSON murni:
+        [{"caption": "Teks keterangan foto 1"}, {"caption": "Teks keterangan foto 2"}]
         """
 
     progress_bar = st.progress(0)
     for i, img in enumerate(images):
-        status_placeholder.info(f"⏳ Mengeksekusi {tipe_dokumen} halaman {i+1}/{len(images)}...")
+        status_placeholder.info(f"⏳ Mengeksekusi {tipe_dokumen} halaman {i+1}/{len(images)}... (Menggunakan Jeda Keamanan)")
         try:
             response = model.generate_content([prompt, img])
             
-            # Mencegah ValueError jika AI diblokir Google Safety Filter
             try:
                 raw_text = response.text
             except ValueError:
-                log_diagnostik.append(f"[WARNING] Halaman {i+1}: Output diblokir oleh Filter Keamanan Google (Safety Rating).")
+                log_diagnostik.append(f"[WARNING] Halaman {i+1}: Output diblokir oleh Filter Keamanan Google.")
                 continue
 
-            # PEMBERSIHAN JSON BERLAPIS BAJA (ANTI HALUSINASI)
+            # PEMBERSIHAN JSON BERLAPIS BAJA
             clean_text = raw_text.replace('```json', '').replace('```', '').strip()
             
-            # Mencari kurung siku pembuka dan penutup
             start_idx = clean_text.find('[')
             end_idx = clean_text.rfind(']')
             
@@ -127,15 +129,17 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
                     else:
                         log_diagnostik.append(f"[ERROR] Halaman {i+1}: Format JSON bukan List/Array.")
                 except json.JSONDecodeError as e:
-                    log_diagnostik.append(f"[ERROR] Halaman {i+1}: JSON Cacat. Raw Output AI: {json_str[:150]}...")
+                    log_diagnostik.append(f"[ERROR] Halaman {i+1}: JSON Cacat.")
             else:
-                log_diagnostik.append(f"[WARNING] Halaman {i+1}: Tidak ada array [] yang dihasilkan. Raw Output AI: {raw_text[:150]}...")
+                log_diagnostik.append(f"[WARNING] Halaman {i+1}: Tidak ada array [] yang dihasilkan.")
 
         except Exception as e:
-            log_diagnostik.append(f"[ERROR API] Halaman {i+1}: {str(e)}")
-            time.sleep(3) 
+            # SISTEM REM DARURAT (Mencegah tilang berlanjut)
+            log_diagnostik.append(f"[ERROR API/429] Halaman {i+1}: Server Menolak. Istirahat 15 detik. Detail: {str(e)[:50]}")
+            time.sleep(15) 
             
-        time.sleep(2) # Ritme Anti-Spam
+        # RITME AMAN GRATISAN (10 halaman per menit maksimal)
+        time.sleep(6) 
         progress_bar.progress((i + 1) / len(images))
     
     status_placeholder.empty()
@@ -150,7 +154,7 @@ if file_mingguan and file_dokumentasi:
         if file_mingguan.name == file_dokumentasi.name:
             st.error("🚨 BLOKIR: Dokumen di kolom 1 dan 2 sama.")
         else:
-            with st.status("🔬 Pembedahan Forensik Aktif...", expanded=True) as status:
+            with st.status("🔬 Pembedahan Forensik Aktif (Sistem Mode Aman)...", expanded=True) as status:
                 st.write("Menarik Rincian Bobot Pekerjaan...")
                 data_m, log_m = bedah_dokumen_dengan_ai(file_mingguan, "mingguan")
                 
@@ -159,7 +163,7 @@ if file_mingguan and file_dokumentasi:
                 
                 status.update(label="Kalkulasi Matematis Selesai.", state="complete", expanded=False)
 
-            # Fitur Otoritas: Log Diagnostik (Membedah alasan kegagalan)
+            # Fitur Otoritas: Log Diagnostik 
             with st.expander("🛠️ Buka Rekam Medis AI (Diagnostik Log - Wajib Cek Jika Gagal)"):
                 st.write("**Log Ekstraksi Laporan Mingguan:**")
                 for log in log_m: st.caption(log)
@@ -170,7 +174,7 @@ if file_mingguan and file_dokumentasi:
             # Lapis Pertahanan Anti-Bisu
             if not data_m:
                 st.error("🚨 GAGAL AUDIT: Mesin AI mengekstrak 0 data valid dari Laporan Mingguan.")
-                st.info("💡 SILAKAN BUKA 'REKAM MEDIS AI' DI ATAS. Anda akan melihat langsung alasan mengapa AI gagal: apakah karena dokumen kosong, bentuk tabel yang ditolak AI, atau halusinasi teks.")
+                st.info("💡 SILAKAN BUKA 'REKAM MEDIS AI' DI ATAS. Jika terdapat tulisan [ERROR API/429], berarti sistem masih terkena sisa tilang Google. Istirahatkan 2 menit lalu coba lagi.")
             elif not data_f:
                 st.error("🚨 GAGAL AUDIT: Mesin AI tidak menemukan caption foto di Laporan Dokumentasi.")
                 st.info("💡 SILAKAN BUKA 'REKAM MEDIS AI' DI ATAS untuk melihat detail kendalanya.")
@@ -193,7 +197,7 @@ if file_mingguan and file_dokumentasi:
                     except (ValueError, TypeError):
                         progres = 0.0
                     
-                    # Logika absolut: hanya audit item yang punya bobot
+                    # LOGIKA ABSOLUT: Hanya audit item yang punya bobot progres
                     if len(deskripsi) < 5 or progres <= 0.0: 
                         continue
                         
@@ -228,7 +232,7 @@ if file_mingguan and file_dokumentasi:
                     st.header("📝 Nota Penetapan Pembayaran")
                     
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("Total Item Aktif", f"{jumlah_item_diaudit} Item")
+                    c1.metric("Total Item Aktif", f"{jumlah_item_diaudit} Item", help="Hanya pekerjaan yang progresnya > 0% minggu ini yang diaudit.")
                     c2.metric("Nilai Progres Ditolak", f"-{total_potongan_progres:.3f}%", delta_color="inverse")
                     c3.metric("Nilai Real Disetujui", f"{progres_diterima:.3f}%")
 
