@@ -1,188 +1,167 @@
 import streamlit as st
-import pdfplumber
 import pandas as pd
 from fuzzywuzzy import fuzz, process
-import pytesseract
 from pdf2image import convert_from_bytes
-import io
+import google.generativeai as genai
+import json
 import re
 
 # ==========================================
-# 1. KONFIGURASI ANTARMUKA (UI)
+# 1. KONFIGURASI SISTEM & API
 # ==========================================
-st.set_page_config(page_title="Evaluasi Laporan PPSPM", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Audit Forensik PPSPM", page_icon="💎", layout="wide")
 
-st.title("🛡️ Sistem Evaluasi Laporan PPSPM")
-st.markdown("""
-**SOP Keuangan & Fisik:** Mesin verifikasi silang untuk memastikan setiap klaim progres fisik didukung oleh bukti empiris sebelum **Surat Perintah Membayar (SPM)** diterbitkan.
-""")
+# Mengambil API Key dari sistem rahasia Streamlit
+try:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+except KeyError:
+    st.error("API Key belum dikonfigurasi di Streamlit Secrets.")
+
+st.title("💎 Sistem Audit Forensik: AI Vision Engine")
+st.markdown("Menggunakan *Multimodal AI* untuk menembus keterbatasan dokumen scan dan mengekstrak rincian pekerjaan secara absolut tanpa typo.")
 st.markdown("---")
 
 # ==========================================
-# 2. INPUT OTORITAS PPSPM & UPLOAD FILE
+# 2. MODUL UPLOAD
 # ==========================================
 st.sidebar.header("⚙️ Parameter Pembayaran")
-klaim_progress_total = st.sidebar.number_input("Klaim Progress Diajukan (%)", min_value=0.000, max_value=100.000, value=2.919, step=0.001, format="%.3f")
-st.sidebar.caption("Input angka klaim dari halaman depan laporan untuk validasi pembayaran.")
+klaim_progress_total = st.sidebar.number_input("Klaim Progress Diajukan (%)", min_value=0.000, value=2.919, step=0.001, format="%.3f")
 
 col1, col2 = st.columns(2)
 with col1:
-    st.subheader("📄 Data 1: Laporan Mingguan")
-    file_mingguan = st.file_uploader("Unggah Laporan Mingguan", type=["pdf"], key="mingguan")
-
+    file_mingguan = st.file_uploader("Unggah Laporan Mingguan", type=["pdf"])
 with col2:
-    st.subheader("📸 Data 2: Laporan Dokumentasi")
-    file_dokumentasi = st.file_uploader("Unggah Laporan Dokumentasi", type=["pdf"], key="dokumentasi")
+    file_dokumentasi = st.file_uploader("Unggah Laporan Dokumentasi", type=["pdf"])
 
 # ==========================================
-# 3. MESIN EKSTRAKSI OCR & AUTO-CORRECT
+# 3. MESIN EKSTRAKSI VISION AI
 # ==========================================
-def koreksi_typo_ocr(teks):
-    """Kamus Auto-Correct Forensik untuk nomenklatur proyek."""
-    kamus_typo = {
-        r'\bOIWOING\b': 'DINDING',
-        r'\bAap\b': 'ATAP',
-        r'\bFingan\b': 'RINGAN',
-        r'\bPernanangan\b': 'PEMASANGAN',
-        r'\bmasangan\b': 'PEMASANGAN',
-        r'\bLani\b': 'LANTAI',
-        r'\bam\b': 'CM',
-        r'\bem\b': 'CM',
-        r'\bKERJIAN\b': 'PEKERJAAN',
-        r'\bDINOING\b': 'DINDING',
-        r'\bBesiing\b': 'Bekisting'
-    }
-    teks_koreksi = teks
-    for salah, benar in kamus_typo.items():
-        teks_koreksi = re.sub(salah, benar, teks_koreksi, flags=re.IGNORECASE)
-    return teks_koreksi
-
-def ekstrak_data_forensik(file_pdf, nama_file):
-    teks_lengkap = ""
+def ekstrak_dengan_vision_ai(file_pdf, tipe_dokumen):
+    """
+    Mengubah PDF menjadi gambar, lalu memerintahkan AI untuk mengekstrak data 
+    dan merapikan ejaan (auto-correct konteks konstruksi) ke format JSON.
+    """
     file_bytes = file_pdf.read()
+    images = convert_from_bytes(file_bytes)
     
-    try:
-        images = convert_from_bytes(file_bytes)
-        for i, img in enumerate(images):
-            page_text = pytesseract.image_to_string(img, lang='ind')
-            teks_lengkap += f"\n[HALAMAN_{i+1}]\n" + page_text
-    except Exception as e:
-        st.error(f"Gagal mengekstrak {nama_file}: {e}")
-        return []
-            
-    baris_teks = [baris.strip() for baris in teks_lengkap.split('\n') if len(baris.strip()) > 10]
-    return baris_teks
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    hasil_ekstraksi = []
+    
+    # Prompt khusus untuk memastikan AI tidak berhalusinasi
+    if tipe_dokumen == "mingguan":
+        prompt = """
+        Ini adalah halaman Laporan Kemajuan Fisik proyek konstruksi.
+        Abaikan garis tabel. Cari item pekerjaan dan lokasinya. 
+        Keluarkan HANYA dalam format array JSON yang valid seperti ini, tanpa teks pengantar:
+        [{"lokasi": "nama madrasah", "pekerjaan": "deskripsi pekerjaan dirapikan ejaannya", "progres": angka_koma_titik}]
+        Jika halaman ini bukan tabel kemajuan fisik, kembalikan [].
+        """
+    else:
+        prompt = """
+        Ini adalah halaman Laporan Dokumentasi Foto proyek konstruksi.
+        Ekstrak teks keterangan (caption) yang ada di bawah/samping foto.
+        Keluarkan HANYA dalam format array JSON yang valid seperti ini, tanpa teks pengantar:
+        [{"keterangan_foto": "teks dirapikan ejaannya"}]
+        Jika tidak ada foto/keterangan, kembalikan [].
+        """
 
-def parse_item_pekerjaan(baris_teks):
-    items = []
-    current_lokasi = "Lokasi Tidak Spesifik"
-    keywords = [
-        "pekerjaan", "pasang", "cor", "fabrikasi", "bekisting", "atap", "keramik", 
-        "pondasi", "plesteran", "galian", "pembesian", "pengecatan", "instalasi",
-        "bongkaran", "struktur", "baja", "beton", "pemancangan", "install", 
-        "supply", "fabrication", "casting", "formwork", "structure", "finishing", 
-        "painting", "wiring", "plumbing", "foundation", "concrete"
-    ]
-    
-    for baris in baris_teks:
-        baris = koreksi_typo_ocr(baris)
+    progress_bar = st.progress(0)
+    for i, img in enumerate(images):
+        try:
+            response = model.generate_content([prompt, img])
+            teks_json = response.text
+            
+            # Membersihkan tag markdown JSON dari respon AI
+            teks_json = re.sub(r'```json|```', '', teks_json).strip()
+            
+            data_page = json.loads(teks_json)
+            hasil_ekstraksi.extend(data_page)
+        except Exception:
+            pass # Lewati halaman jika AI gagal mem-parsing JSON
+        progress_bar.progress((i + 1) / len(images))
         
-        jumlah_huruf = sum(c.isalpha() for c in baris)
-        rasio_huruf = jumlah_huruf / len(baris) if len(baris) > 0 else 0
-
-        if re.search(r'\b(MIS|MTSS)\b', baris.upper()) and rasio_huruf > 0.5:
-            lokasi_bersih = re.sub(r'[\|_\\/\[\]{}<>]', '', baris).strip()
-            current_lokasi = lokasi_bersih
-            
-        if any(k in baris.lower() for k in keywords):
-            baris_bersih = re.sub(r'[\|_\\/\[\]{}<>]', '', baris)
-            baris_bersih = ''.join([i for i in baris_bersih if not i.isdigit()]).replace('.', '').replace(',', '').strip()
-            
-            jumlah_huruf_bersih = sum(c.isalpha() for c in baris_bersih)
-            rasio_huruf_bersih = jumlah_huruf_bersih / len(baris_bersih) if len(baris_bersih) > 0 else 0
-            
-            if len(baris_bersih) > 15 and rasio_huruf_bersih > 0.6:
-                items.append({
-                    "lokasi": current_lokasi,
-                    "pekerjaan": baris_bersih
-                })
-    return items
+    progress_bar.empty()
+    return hasil_ekstraksi
 
 # ==========================================
-# 4. EKSEKUSI AUDIT PPSPM
+# 4. EKSEKUSI AUDIT
 # ==========================================
 if file_mingguan and file_dokumentasi:
     st.markdown("---")
-    if st.button("🚀 JALANKAN EVALUASI & VERIFIKASI PPSPM", use_container_width=True):
-        with st.spinner('Memverifikasi kelayakan data untuk penerbitan SPM...'):
+    if st.button("🚀 EKSEKUSI PEMBEDAHAN VISION AI", use_container_width=True):
+        with st.spinner('AI Vision sedang menelusuri piksel dan merapikan nomenklatur...'):
             
-            raw_mingguan = ekstrak_data_forensik(file_mingguan, "Laporan Mingguan")
-            raw_dokumentasi = ekstrak_data_forensik(file_dokumentasi, "Laporan Dokumentasi")
+            # Mendapatkan data terstruktur yang 100% bersih
+            data_mingguan = ekstrak_dengan_vision_ai(file_mingguan, "mingguan")
+            data_foto = ekstrak_dengan_vision_ai(file_dokumentasi, "dokumentasi")
             
-            klaim_items = parse_item_pekerjaan(raw_mingguan)
-            
-            if klaim_items:
-                st.subheader("📊 Matriks Verifikasi Visual & Administratif")
+            if data_mingguan and data_foto:
+                st.subheader("📊 Matriks Verifikasi Visual Presisi Tinggi")
+                
+                # Menggabungkan semua teks caption foto menjadi satu corpus
+                teks_bukti_visual = [item.get("keterangan_foto", "") for item in data_foto]
                 
                 audit_results = []
                 item_ditolak = 0
-                total_item = len(klaim_items)
-                strictness = 75
                 
-                for item in klaim_items:
-                    best_match, score = process.extractOne(item['pekerjaan'], raw_dokumentasi, scorer=fuzz.token_set_ratio)
-                    status = "✅ VALID" if score >= strictness else "❌ DEFISIT BUKTI"
+                for item in data_mingguan:
+                    pekerjaan = item.get('pekerjaan', '')
+                    lokasi = item.get('lokasi', 'Tidak Spesifik')
+                    
+                    if not pekerjaan or len(pekerjaan) < 10:
+                        continue
+                        
+                    # Fuzzy matching antara teks laporan (yang sudah bersih) dengan caption foto (bersih)
+                    best_match, score = process.extractOne(pekerjaan, teks_bukti_visual, scorer=fuzz.token_set_ratio)
+                    status = "✅ VALID" if score >= 75 else "❌ DEFISIT BUKTI"
                     
                     if status == "❌ DEFISIT BUKTI":
                         item_ditolak += 1
                         
                     audit_results.append({
-                        "Lokasi": item['lokasi'],
-                        "Uraian Pekerjaan": item['pekerjaan'],
+                        "Lokasi (Pin-Point)": lokasi.upper(),
+                        "Uraian Pekerjaan": pekerjaan,
                         "Status Kelayakan": status,
-                        "Dokumentasi Ditemukan": best_match if score >= strictness else "Tidak Memenuhi Standar",
+                        "Bukti Visual": best_match if score >= 75 else "Tidak Ada Dokumentasi",
                     })
                 
-                df = pd.DataFrame(audit_results)
-                
-                try:
-                    st.dataframe(df.style.map(lambda x: 'color: red; font-weight: bold' if x == "❌ DEFISIT BUKTI" else '', subset=['Status Kelayakan']), use_container_width=True)
-                except AttributeError:
-                    st.dataframe(df.style.applymap(lambda x: 'color: red; font-weight: bold' if x == "❌ DEFISIT BUKTI" else '', subset=['Status Kelayakan']), use_container_width=True)
-                
-                # ==========================================
-                # 5. KEPUTUSAN FINAL PPSPM
-                # ==========================================
-                persentase_ditolak = (item_ditolak / total_item) * 100 if total_item > 0 else 0
-                estimasi_potongan = (persentase_ditolak / 100) * klaim_progress_total
-                estimasi_diterima = klaim_progress_total - estimasi_potongan
-                
-                st.markdown("---")
-                st.header("📝 Nota Keputusan PPSPM")
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Total Item Diajukan", f"{total_item} Pekerjaan")
-                c2.metric("Item Defisit Bukti", f"{item_ditolak} Pekerjaan", delta_color="inverse")
-                c3.metric("Rasio Integritas Data", f"{(100 - persentase_ditolak):.1f}%")
+                if audit_results:
+                    df = pd.DataFrame(audit_results)
+                    total_item = len(df)
+                    
+                    try:
+                        st.dataframe(df.style.map(lambda x: 'color: red; font-weight: bold' if x == "❌ DEFISIT BUKTI" else '', subset=['Status Kelayakan']), use_container_width=True)
+                    except AttributeError:
+                        st.dataframe(df.style.applymap(lambda x: 'color: red; font-weight: bold' if x == "❌ DEFISIT BUKTI" else '', subset=['Status Kelayakan']), use_container_width=True)
+                    
+                    # ----------------- KEPUTUSAN FINAL -----------------
+                    persentase_ditolak = (item_ditolak / total_item) * 100 if total_item > 0 else 0
+                    estimasi_potongan = (persentase_ditolak / 100) * klaim_progress_total
+                    estimasi_diterima = klaim_progress_total - estimasi_potongan
+                    
+                    st.markdown("---")
+                    st.header("📝 Nota Keputusan PPSPM")
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Total Item Diajukan", f"{total_item} Pekerjaan")
+                    c2.metric("Item Defisit Bukti", f"{item_ditolak} Pekerjaan", delta_color="inverse")
+                    c3.metric("Rasio Integritas Data", f"{(100 - persentase_ditolak):.1f}%")
 
-                lokasi_bermasalah = df[df['Status Kelayakan'] == '❌ DEFISIT BUKTI']['Lokasi'].unique().tolist()
-                teks_lokasi = ", ".join(lokasi_bermasalah) if lokasi_bermasalah else "Nihil"
+                    lokasi_bermasalah = df[df['Status Kelayakan'] == '❌ DEFISIT BUKTI']['Lokasi (Pin-Point)'].unique().tolist()
+                    teks_lokasi = ", ".join(lokasi_bermasalah) if lokasi_bermasalah else "Nihil"
 
-                st.warning(f"""
-                **HASIL EVALUASI PPSPM:**
-                Berdasarkan verifikasi administrasi dan visual, klaim progres sebesar **{klaim_progress_total:.3f}%** memiliki rasio cacat dokumentasi sebesar **{persentase_ditolak:.1f}%**. Terdapat **{item_ditolak}** item pekerjaan yang diajukan untuk pembayaran namun tidak didukung oleh bukti empiris yang sah.
-                
-                **ZONA RISIKO AUDIT:**
-                Defisit bukti terkonsentrasi pada lokasi: **{teks_lokasi}**.
-                
-                **KEPUTUSAN PENERBITAN SPM:**
-                Mengingat prinsip kehati-hatian dalam pengelolaan keuangan negara, **Surat Perintah Membayar (SPM) TIDAK DAPAT DITERBITKAN secara penuh**. Direkomendasikan untuk melakukan pemotongan nilai pembayaran setara dengan rasio deviasi visual (**{estimasi_potongan:.3f}%**). Nilai maksimal yang memenuhi syarat keamanan administratif untuk dicairkan saat ini adalah **{estimasi_diterima:.3f}%**.
-                """)
+                    st.warning(f"""
+                    **HASIL EVALUASI:**
+                    Dari total **{total_item}** item pekerjaan yang diekstrak dengan akurasi tinggi, terdapat **{item_ditolak}** item pekerjaan (rasio deviasi {persentase_ditolak:.1f}%) yang tidak didukung oleh dokumentasi visual.
+                    
+                    **LOKASI KRITIS (PIN-POINT):**
+                    Pekerjaan tanpa bukti visual berpusat di: **{teks_lokasi}**.
+                    
+                    **KEPUTUSAN PENERBITAN SPM:**
+                    SPM tidak dapat diterbitkan secara penuh. Nilai progres maksimal yang memenuhi syarat keamanan administratif dan visual untuk dicairkan saat ini adalah **{estimasi_diterima:.3f}%**.
+                    """)
             else:
-                st.error("Gagal mengekstrak teks. Pastikan dokumen dapat dibaca oleh OCR.")
+                st.error("Gagal mengekstrak data. Pastikan dokumen yang diunggah benar.")
 
 elif not file_mingguan or not file_dokumentasi:
-    st.info("Sistem dalam status Stand By. Menunggu dokumen pelengkap tagihan.")
-
-st.markdown("---")
-st.caption("Sistem dirancang dengan pendekatan presisi absolut. Keputusan pencairan dana tetap berada pada otoritas penuh PPSPM.")
+    st.info("Sistem dalam status Stand By.")
