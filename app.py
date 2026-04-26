@@ -20,7 +20,7 @@ except KeyError:
     st.stop()
 
 st.title("🛡️ Sistem Evaluasi Laporan PPSPM (Absolute Precision)")
-st.markdown("Audit forensik yang hanya mengeksekusi item dengan nilai progres aktif. Memastikan pemotongan tagihan didasarkan pada perhitungan matematis yang sah secara hukum.")
+st.markdown("Audit forensik aktif. Memastikan pemotongan tagihan didasarkan pada perhitungan matematis yang sah secara hukum.")
 st.markdown("---")
 
 # ==========================================
@@ -35,7 +35,7 @@ def dapatkan_daftar_model_sah():
                 model_tersedia.append(m.name.replace('models/', ''))
         return model_tersedia
     except Exception as e:
-        return ["gemini-1.5-flash"]
+        return ["gemini-2.0-flash", "gemini-1.5-flash"]
 
 daftar_model_resmi = dapatkan_daftar_model_sah()
 
@@ -60,7 +60,7 @@ with col2:
     file_dokumentasi = st.file_uploader("Unggah PDF Foto", type=["pdf"])
 
 # ==========================================
-# 4. MESIN EKSTRAKSI VISION AI (PENGGALI ANGKA)
+# 4. MESIN EKSTRAKSI VISION AI
 # ==========================================
 def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
     status_placeholder = st.empty()
@@ -74,20 +74,23 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
     results = []
     
     if tipe_dokumen == "mingguan":
+        # Prompt diperluas agar AI tidak kaku dalam mencari angka progres
         prompt = """
-        Sebagai auditor, bedah tabel kemajuan fisik ini secara presisi.
-        Ekstrak 3 data: 
-        1. Nama Lokasi
-        2. Uraian Pekerjaan
-        3. Nilai angka pada kolom "Progres Minggu Ini" (ubah koma menjadi titik untuk desimal. Contoh: 2,50 menjadi 2.5). Jika kosong/tidak ada progres, isi 0.0.
+        Sebagai auditor, bedah tabel kemajuan fisik ini.
+        Ekstrak 3 data per baris pekerjaan: 
+        1. Nama Lokasi (Jika tidak ada, isi "UMUM")
+        2. Uraian Pekerjaan (Perbaiki typo jika ada)
+        3. Angka progres kemajuan MINGGU INI (bobot aktif). Ubah koma jadi titik (misal 2,5 jadi 2.5). Jika tidak ada angka progres di baris tersebut, isi 0.0.
         
         WAJIB kembalikan format JSON murni: 
-        [{"lokasi": "NAMA", "pekerjaan": "DESKRIPSI", "progres": 0.00}]
+        [{"lokasi": "NAMA", "pekerjaan": "DESKRIPSI", "progres": 0.0}]
+        Jika halaman ini bukan tabel pekerjaan, kembalikan []
         """
     else:
         prompt = """
-        Baca keterangan (caption) pada foto dokumentasi proyek ini.
+        Baca teks keterangan (caption) pada foto dokumentasi proyek ini.
         WAJIB kembalikan format JSON murni: [{"caption": "TEKS KETERANGAN FOTO"}]
+        Jika halaman ini tidak memiliki foto/caption, kembalikan []
         """
 
     progress_bar = st.progress(0)
@@ -112,7 +115,7 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
     return results
 
 # ==========================================
-# 5. EKSEKUSI AUDIT EKSKLUSIF (HANYA ITEM AKTIF)
+# 5. EKSEKUSI AUDIT (ANTI-SILENT ERROR)
 # ==========================================
 if file_mingguan and file_dokumentasi:
     if st.button("🚀 EKSEKUSI AUDIT PRESISI", use_container_width=True):
@@ -128,7 +131,12 @@ if file_mingguan and file_dokumentasi:
                 
                 status.update(label="Kalkulasi Matematis Selesai.", state="complete", expanded=False)
 
-            if data_m and data_f:
+            # Lapis Pertahanan Baru: Mencegah Kegagalan Bisu (Silent Error)
+            if not data_m:
+                st.error("🚨 GAGAL AUDIT: Mesin AI tidak menemukan rincian pekerjaan atau angka progres di Laporan Mingguan. Pastikan dokumen yang diunggah adalah tabel Rincian Kemajuan Fisik yang sah.")
+            elif not data_f:
+                st.error("🚨 GAGAL AUDIT: Mesin AI tidak mendeteksi teks caption apa pun di Laporan Dokumentasi.")
+            else:
                 st.subheader("📊 Matriks Verifikasi Evaluasi")
                 kumpulan_caption = [str(f.get("caption", "")) for f in data_f if isinstance(f, dict)]
                 
@@ -142,14 +150,11 @@ if file_mingguan and file_dokumentasi:
                     deskripsi = str(item.get("pekerjaan", "")).strip()
                     lokasi = str(item.get("lokasi", "TIDAK SPESIFIK")).strip().upper()
                     
-                    # Konversi progres dengan aman
                     try:
                         progres = float(item.get("progres", 0.0))
                     except (ValueError, TypeError):
                         progres = 0.0
                     
-                    # LOGIKA FILTER ABSOLUT: 
-                    # Jika tidak ada pekerjaan atau progresnya 0, abaikan (jangan diaudit)
                     if len(deskripsi) < 10 or progres <= 0.0: 
                         continue
                         
@@ -177,11 +182,7 @@ if file_mingguan and file_dokumentasi:
                     except AttributeError:
                         st.dataframe(df.style.applymap(lambda x: 'color: red; font-weight: bold' if x == "❌ DEFISIT" else '', subset=['Status']), use_container_width=True)
 
-                    # ==========================================
-                    # 6. KEPUTUSAN FINAL BERDASARKAN BOBOT EKSAK
-                    # ==========================================
                     progres_diterima = klaim_progress_total - total_potongan_progres
-                    # Pencegah minus jika potongan OCR salah deteksi angka melebihi klaim total
                     if progres_diterima < 0: progres_diterima = 0.0 
                     
                     st.markdown("---")
@@ -203,4 +204,4 @@ if file_mingguan and file_dokumentasi:
                     Rekomendasi nilai maksimal Surat Perintah Membayar (SPM) yang memiliki landasan hukum empiris untuk dicairkan adalah sebesar **{progres_diterima:.3f}%**.
                     """)
                 else:
-                    st.warning("Tidak ditemukan pekerjaan dengan progres > 0% pada laporan ini.")
+                    st.warning("⚠️ HASIL NIHIL: Dokumen berhasil dibaca, namun tidak ada satupun item pekerjaan yang memiliki angka progres > 0.0 pada Laporan Mingguan.")
