@@ -104,7 +104,7 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
         try:
             response = model.generate_content([prompt, img])
             # Membersihkan Markdown dan menarik JSON (Baris ini sudah diperbaiki secara absolut)
-            clean_text = re.sub(r'            match = re.search(r'\[.*\]', clean_text, re.DOTALL)
+            clean_text = re.sub(r'match = re.search(r'\[.*\]', clean_text, re.DOTALL)
             
             if match:
                 data = json.loads(match.group(0))
