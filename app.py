@@ -84,8 +84,8 @@ if btn_audit:
                     if not table: continue
                     
                     for row in table:
-                        # Syarat sangat longgar: Asal tabel punya cukup kolom untuk menampung data progres
-                        if len(row) < 9: continue 
+                        # PERISAI ANTI GHOST-ROW: Pastikan 'row' bukan None sebelum menghitung length-nya
+                        if not row or len(row) < 9: continue 
                         
                         lok_baru = detect_madrasah(row)
                         if lok_baru: lokasi_skrg = lok_baru
