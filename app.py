@@ -20,7 +20,7 @@ except KeyError:
     st.stop()
 
 st.title("🛡️ Sistem Evaluasi Laporan PPSPM (Absolute Precision)")
-st.markdown("Audit forensik aktif. Memastikan pemotongan tagihan didasarkan pada perhitungan matematis yang sah secara hukum, beroperasi dengan ritme aman (Anti-Blokir 429).")
+st.markdown("Audit forensik aktif. Dilengkapi dengan **Sistem Pemutus Arus Darurat** dan **Pacing Maksimal (14 RPM)** untuk efisiensi waktu tertinggi di jalur gratis.")
 st.markdown("---")
 
 # ==========================================
@@ -35,7 +35,7 @@ def dapatkan_daftar_model_sah():
                 model_tersedia.append(m.name.replace('models/', ''))
         return model_tersedia
     except Exception as e:
-        return ["gemini-2.0-flash", "gemini-1.5-flash"]
+        return ["gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-1.5-flash"]
 
 daftar_model_resmi = dapatkan_daftar_model_sah()
 
@@ -45,6 +45,7 @@ with st.sidebar:
     
     st.markdown("---")
     st.subheader("🧠 Otak Analitik API")
+    st.caption("PENTING: Gunakan model dengan batas RPD besar (misal: 3.1-flash-lite) untuk dokumen tebal.")
     target_model = st.selectbox("Versi Mesin:", daftar_model_resmi)
 
 # ==========================================
@@ -60,7 +61,7 @@ with col2:
     file_dokumentasi = st.file_uploader("Unggah PDF Foto", type=["pdf"], key="dokumentasi")
 
 # ==========================================
-# 4. MESIN EKSTRAKSI VISION AI (ANTI-BLOKIR & REKAM MEDIS)
+# 4. MESIN EKSTRAKSI (14 RPM + CIRCUIT BREAKER)
 # ==========================================
 def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
     status_placeholder = st.empty()
@@ -72,7 +73,7 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
         log_diagnostik.append(f"[INFO] Berhasil mengonversi PDF {tipe_dokumen} menjadi {len(images)} gambar.")
     except Exception as e:
         st.error(f"Gagal membedah PDF {tipe_dokumen}: {e}")
-        return [], [f"[FATAL] Gagal konversi PDF: {e}"]
+        return [], [f"[FATAL] Gagal konversi PDF: {e}"], False
 
     model = genai.GenerativeModel(target_model)
     
@@ -102,8 +103,10 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
         """
 
     progress_bar = st.progress(0)
+    darurat_berhenti = False
+
     for i, img in enumerate(images):
-        status_placeholder.info(f"⏳ Mengeksekusi {tipe_dokumen} halaman {i+1}/{len(images)}... (Menggunakan Jeda Keamanan)")
+        status_placeholder.info(f"⏳ Mengeksekusi {tipe_dokumen} halaman {i+1}/{len(images)}... (Memacu di 14 RPM)")
         try:
             response = model.generate_content([prompt, img])
             
@@ -113,9 +116,7 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
                 log_diagnostik.append(f"[WARNING] Halaman {i+1}: Output diblokir oleh Filter Keamanan Google.")
                 continue
 
-            # PEMBERSIHAN JSON BERLAPIS BAJA
             clean_text = raw_text.replace('```json', '').replace('```', '').strip()
-            
             start_idx = clean_text.find('[')
             end_idx = clean_text.rfind(']')
             
@@ -126,58 +127,64 @@ def bedah_dokumen_dengan_ai(file_pdf, tipe_dokumen):
                     if isinstance(data, list):
                         results.extend(data)
                         log_diagnostik.append(f"[SUKSES] Halaman {i+1}: Terekstrak {len(data)} baris data.")
-                    else:
-                        log_diagnostik.append(f"[ERROR] Halaman {i+1}: Format JSON bukan List/Array.")
-                except json.JSONDecodeError as e:
+                except json.JSONDecodeError:
                     log_diagnostik.append(f"[ERROR] Halaman {i+1}: JSON Cacat.")
             else:
                 log_diagnostik.append(f"[WARNING] Halaman {i+1}: Tidak ada array [] yang dihasilkan.")
 
         except Exception as e:
-            # SISTEM REM DARURAT (Mencegah tilang berlanjut)
-            log_diagnostik.append(f"[ERROR API/429] Halaman {i+1}: Server Menolak. Istirahat 15 detik. Detail: {str(e)[:50]}")
-            time.sleep(15) 
+            pesan_error = str(e).lower()
+            # SISTEM PEMUTUS ARUS (CIRCUIT BREAKER)
+            if "429" in pesan_error or "quota" in pesan_error:
+                log_diagnostik.append(f"[FATAL/429] Halaman {i+1}: Kuota API Habis/Terblokir. MENGHENTIKAN SISA HALAMAN SECARA PAKSA.")
+                darurat_berhenti = True
+                break # LANGSUNG HENTIKAN LOOP, JANGAN DILANJUTKAN
+            else:
+                log_diagnostik.append(f"[ERROR] Halaman {i+1}: {pesan_error[:50]}")
             
-        # RITME AMAN GRATISAN (10 halaman per menit maksimal)
-        time.sleep(6) 
+        # MANUVER KECEPATAN MAKSIMAL (Tepat 14 RPM)
+        # 60 detik / 14 request = 4.28 detik per request
+        time.sleep(4.3) 
         progress_bar.progress((i + 1) / len(images))
     
     status_placeholder.empty()
     progress_bar.empty()
-    return results, log_diagnostik
+    return results, log_diagnostik, darurat_berhenti
 
 # ==========================================
-# 5. EKSEKUSI AUDIT (TRANSPARANSI PENUH)
+# 5. EKSEKUSI AUDIT 
 # ==========================================
 if file_mingguan and file_dokumentasi:
     if st.button("🚀 EKSEKUSI AUDIT PRESISI", use_container_width=True):
         if file_mingguan.name == file_dokumentasi.name:
             st.error("🚨 BLOKIR: Dokumen di kolom 1 dan 2 sama.")
         else:
-            with st.status("🔬 Pembedahan Forensik Aktif (Sistem Mode Aman)...", expanded=True) as status:
+            with st.status("🔬 Pembedahan Forensik Aktif (Memacu 14 RPM)...", expanded=True) as status:
                 st.write("Menarik Rincian Bobot Pekerjaan...")
-                data_m, log_m = bedah_dokumen_dengan_ai(file_mingguan, "mingguan")
+                data_m, log_m, henti_m = bedah_dokumen_dengan_ai(file_mingguan, "mingguan")
                 
-                st.write("Mengkompilasi Metadata Visual...")
-                data_f, log_f = bedah_dokumen_dengan_ai(file_dokumentasi, "foto")
+                if henti_m:
+                    st.error("Sistem Pemutus Arus Aktif: Ekstraksi Laporan Mingguan dihentikan paksa karena Kuota API Habis.")
+                    data_f, log_f, henti_f = [], [], True
+                else:
+                    st.write("Mengkompilasi Metadata Visual...")
+                    data_f, log_f, henti_f = bedah_dokumen_dengan_ai(file_dokumentasi, "foto")
                 
-                status.update(label="Kalkulasi Matematis Selesai.", state="complete", expanded=False)
+                status.update(label="Proses Selesai.", state="complete", expanded=False)
 
-            # Fitur Otoritas: Log Diagnostik 
-            with st.expander("🛠️ Buka Rekam Medis AI (Diagnostik Log - Wajib Cek Jika Gagal)"):
+            with st.expander("🛠️ Buka Rekam Medis AI (Diagnostik Log)"):
                 st.write("**Log Ekstraksi Laporan Mingguan:**")
                 for log in log_m: st.caption(log)
                 st.write("---")
                 st.write("**Log Ekstraksi Dokumentasi:**")
                 for log in log_f: st.caption(log)
 
-            # Lapis Pertahanan Anti-Bisu
-            if not data_m:
-                st.error("🚨 GAGAL AUDIT: Mesin AI mengekstrak 0 data valid dari Laporan Mingguan.")
-                st.info("💡 SILAKAN BUKA 'REKAM MEDIS AI' DI ATAS. Jika terdapat tulisan [ERROR API/429], berarti sistem masih terkena sisa tilang Google. Istirahatkan 2 menit lalu coba lagi.")
+            if henti_m or henti_f:
+                st.error("🚨 OPERASI DIBATALKAN: Anda menabrak batas Kuota Harian (RPD) Google. Silakan ganti Versi Mesin ke model yang kuotanya masih banyak (misal: 3.1 Flash Lite) di panel kiri, lalu coba lagi.")
+            elif not data_m:
+                st.error("🚨 GAGAL AUDIT: 0 data valid dari Laporan Mingguan.")
             elif not data_f:
-                st.error("🚨 GAGAL AUDIT: Mesin AI tidak menemukan caption foto di Laporan Dokumentasi.")
-                st.info("💡 SILAKAN BUKA 'REKAM MEDIS AI' DI ATAS untuk melihat detail kendalanya.")
+                st.error("🚨 GAGAL AUDIT: 0 caption foto ditemukan.")
             else:
                 st.subheader("📊 Matriks Verifikasi Evaluasi")
                 kumpulan_caption = [str(f.get("caption", "")) for f in data_f if isinstance(f, dict)]
@@ -197,7 +204,6 @@ if file_mingguan and file_dokumentasi:
                     except (ValueError, TypeError):
                         progres = 0.0
                     
-                    # LOGIKA ABSOLUT: Hanya audit item yang punya bobot progres
                     if len(deskripsi) < 5 or progres <= 0.0: 
                         continue
                         
@@ -232,22 +238,8 @@ if file_mingguan and file_dokumentasi:
                     st.header("📝 Nota Penetapan Pembayaran")
                     
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("Total Item Aktif", f"{jumlah_item_diaudit} Item", help="Hanya pekerjaan yang progresnya > 0% minggu ini yang diaudit.")
+                    c1.metric("Total Item Aktif", f"{jumlah_item_diaudit} Item")
                     c2.metric("Nilai Progres Ditolak", f"-{total_potongan_progres:.3f}%", delta_color="inverse")
                     c3.metric("Nilai Real Disetujui", f"{progres_diterima:.3f}%")
-
-                    st.info(f"""
-                    **ANALISIS UTILITARIAN:**
-                    Sistem mengisolasi **{jumlah_item_diaudit}** item pekerjaan yang aktif diklaim minggu ini. 
-                    
-                    **EKSEKUSI PEMOTONGAN:**
-                    Ditemukan defisit dokumentasi visual. Tagihan dikurangi eksak **{total_potongan_progres:.3f}%** sesuai bobot rincian pekerjaan yang fiktif.
-                    
-                    **KEPUTUSAN SPM:**
-                    Surat Perintah Membayar direkomendasikan maksimal sebesar **{progres_diterima:.3f}%**.
-                    """)
                 else:
-                    st.warning("⚠️ HASIL NIHIL: Dokumen berhasil dibedah, namun tidak ada pekerjaan dengan progres > 0.0. Silakan cek 'Rekam Medis AI' untuk memastikan.")
-
-elif not file_mingguan or not file_dokumentasi:
-    st.info("Sistem dalam Status Stand By. Menunggu otorisasi dokumen.")
+                    st.warning("⚠️ HASIL NIHIL: Tidak ada pekerjaan dengan progres > 0.0.")
