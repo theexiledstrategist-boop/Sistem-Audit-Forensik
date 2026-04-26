@@ -4,26 +4,17 @@ import pandas as pd
 import fitz  # PyMuPDF
 import io
 import re
-from PIL import Image
 from datetime import datetime
 
 # ==========================================
-# 1. KONFIGURASI UI & TEMA
+# 1. KONFIGURASI UI (SAFE MODE)
 # ==========================================
-st.set_page_config(page_title="Audit Forensik PHTC Ultimate", page_icon="⚖️", layout="wide")
-
-st.markdown("""
-    <style>
-    .main { background-color: #f4f7f9; }
-    .stMetric { background-color: white; padding: 15px; border-radius: 8px; border-left: 5px solid #0056b3; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    .summary-card { background-color: #ffffff; padding: 20px; border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 20px; }
-    </style>
-    """, unsafe_allow_html=True)
+st.set_page_config(page_title="Audit Forensik PHTC", page_icon="⚖️", layout="wide")
+st.markdown("<style>.main { background-color: #f4f7f9; }</style>", unsafe_allow_html=True)
 
 # ==========================================
-# 2. MESIN EKSTRAKSI (SELF-HEALING LOGIC)
+# 2. MESIN EKSTRAKSI KEBANGKITAN
 # ==========================================
-
 def get_float(val):
     if val is None: return 0.0
     try:
@@ -54,92 +45,73 @@ def get_keywords_list(uraian):
 # ==========================================
 # 3. INTERFACE PENGAWASAN
 # ==========================================
-st.title("🛡️ Audit Forensik PHTC: Self-Healing Mode")
-st.caption("Standard Operational Protocol: Ketahanan Absolut terhadap Anomali Data")
+st.title("🛡️ Audit Forensik PHTC (Safe Render Mode)")
+st.caption("Mode Anti-Crash: Menonaktifkan rendering gaya untuk kompatibilitas penuh.")
 
 with st.sidebar:
     st.header("📂 Data Proyek")
     f_mingguan = st.file_uploader("Upload Laporan Mingguan", type="pdf")
     f_foto = st.file_uploader("Upload Laporan Dokumentasi", type="pdf")
-    st.markdown("---")
-    btn_audit = st.button("🚀 JALANKAN AUDIT TOTAL", use_container_width=True)
+    btn_audit = st.button("🚀 JALANKAN AUDIT", use_container_width=True)
 
 if not (f_mingguan and f_foto):
-    st.info("Sistem dalam posisi stand-by. Unggah dokumen untuk memicu audit sekuensial.")
+    st.info("Sistem stand-by. Unggah dokumen.")
     st.stop()
 
 # ==========================================
-# 4. EKSEKUSI AUDIT & GENERASI OUTPUT
+# 4. EKSEKUSI AUDIT
 # ==========================================
 if btn_audit:
     pekerjaan_aktif = []
     lokasi_skrg = "UMUM (TIDAK TERDETEKSI)"
-    log_error_internal = []
     
-    # --- FASE 1: TABULASI DENGAN PERISAI TRY-EXCEPT ---
-    with st.spinner("Fase 1: Mengekstrak data dengan sistem proteksi anomali (Self-Healing)..."):
+    with st.spinner("Fase 1: Mengekstrak tabel kemajuan fisik..."):
         try:
             with pdfplumber.open(f_mingguan) as pdf:
-                for page_num, page in enumerate(pdf.pages, 1):
-                    try:
-                        # Menarik SEMUA tabel di halaman, bukan hanya tabel pertama
-                        tables = page.extract_tables()
-                        if not tables: continue
-                        
-                        for table in tables:
-                            for row_idx, row in enumerate(table):
-                                # PERISAI MIKRO: Jika 1 baris rusak, sistem tidak akan mati
-                                try:
-                                    if not row or len(row) < 9: continue 
-                                    
-                                    lok_baru = detect_madrasah(row)
-                                    if lok_baru: lokasi_skrg = lok_baru
-                                    
-                                    uraian = safe_get(row, 1)
-                                    if not uraian or len(uraian) < 3: 
-                                        uraian = safe_get(row, 2)
-                                    if not uraian or uraian.upper() in ['NONE', '', 'URAIAN PEKERJAAN', 'JENIS PEKERJAAN', 'NO']: continue
-                                    
-                                    raw_ini = safe_get(row, 8)
-                                    if not any(c.isdigit() for c in raw_ini): continue
-                                    
-                                    b_ini = get_float(raw_ini)
-                                    if b_ini > 0:
-                                        pekerjaan_aktif.append({
-                                            "Lokasi": lokasi_skrg, 
-                                            "Uraian": uraian,
-                                            "Lalu": get_float(safe_get(row, 5)), 
-                                            "Ini": b_ini,
-                                            "Total": get_float(safe_get(row, 11)), 
-                                            "KW": get_keywords_list(uraian)
-                                        })
-                                except Exception as e_row:
-                                    # Sistem mencatat error secara rahasia dan melanjutkan ke baris berikutnya
-                                    log_error_internal.append(f"Hal {page_num}, Baris {row_idx}: {str(e_row)}")
-                                    continue 
-                    except Exception as e_page:
-                        log_error_internal.append(f"Gagal membedah Hal {page_num}: {str(e_page)}")
-                        continue
+                for page in pdf.pages:
+                    tables = page.extract_tables()
+                    if not tables: continue
+                    for table in tables:
+                        for row in table:
+                            try:
+                                if not row or len(row) < 9: continue 
+                                lok_baru = detect_madrasah(row)
+                                if lok_baru: lokasi_skrg = lok_baru
+                                
+                                uraian = safe_get(row, 1)
+                                if not uraian or len(uraian) < 3: uraian = safe_get(row, 2)
+                                if not uraian or uraian.upper() in ['NONE', '', 'URAIAN PEKERJAAN', 'JENIS PEKERJAAN', 'NO']: continue
+                                
+                                raw_ini = safe_get(row, 8)
+                                if not any(c.isdigit() for c in raw_ini): continue
+                                
+                                b_ini = get_float(raw_ini)
+                                if b_ini > 0:
+                                    pekerjaan_aktif.append({
+                                        "Lokasi": lokasi_skrg, 
+                                        "Uraian": uraian,
+                                        "Lalu": get_float(safe_get(row, 5)), 
+                                        "Ini": b_ini,
+                                        "Total": get_float(safe_get(row, 11)), 
+                                        "KW": get_keywords_list(uraian)
+                                    })
+                            except: continue 
         except Exception as e:
-            st.error(f"Sistem gagal mengekstrak file PDF Laporan Mingguan: {e}")
+            st.error(f"Gagal membedah PDF Laporan Mingguan: {e}")
             st.stop()
 
     if not pekerjaan_aktif:
-        st.error("Gagal mendeteksi item progres. PDF Laporan Mingguan ini mungkin berupa gambar hasil 'scan' atau format matriks kolomnya telah diubah total oleh Kontraktor.")
-        if log_error_internal:
-            with st.expander("Lihat Log Error Internal (Diagnostic)"):
-                st.write(log_error_internal[:15])
+        st.error("Gagal mendeteksi progres. Tabel mungkin tidak sesuai standar KemenPU.")
         st.stop()
 
-    # --- FASE 2: VERIFIKASI VISUAL ---
     with st.spinner("Fase 2: Validasi silang dengan dokumentasi..."):
         teks_foto_db = ""
         try:
             doc_foto = fitz.open(stream=f_foto.read(), filetype="pdf")
             for p in doc_foto: teks_foto_db += p.get_text("text").upper() + " "
             doc_foto.close()
-        except Exception as e_foto:
-            st.error(f"Gagal membaca PDF Laporan Dokumentasi: {e_foto}")
+        except Exception as e:
+            st.error(f"Gagal membaca PDF Laporan Foto: {e}")
             st.stop()
         
         final_report = []
@@ -150,71 +122,41 @@ if btn_audit:
             found_kw = [k for k in item['KW'] if k in teks_foto_db]
             if found_kw:
                 status = "✅ VALID"
-                alasan = f"Terverifikasi melalui kata kunci: {', '.join(found_kw)}"
+                alasan = f"Kata kunci ditemukan: {', '.join(found_kw)}"
             elif not item['KW']:
                 status = "⚠️ MANUAL"
-                alasan = "Uraian terlalu umum, memerlukan cek fisik."
+                alasan = "Uraian terlalu umum."
             
             final_report.append({
-                "Lokasi": item['Lokasi'], "Item": item['Uraian'],
-                "Progres": f"+{item['Ini']}%", "Status": status, "Analisis": alasan
+                "Lokasi": item['Lokasi'], 
+                "Item": item['Uraian'],
+                "Progres": f"+{item['Ini']}%", 
+                "Status": status, 
+                "Analisis": alasan
             })
 
-    # --- FASE 3: KONSTRUKSI RANGKUMAN ---
-    summary_work_loc = {}
-    summary_stats = {}
-
-    for res in final_report:
-        loc = res["Lokasi"]
-        if loc not in summary_work_loc: summary_work_loc[loc] = []
-        if loc not in summary_stats: summary_stats[loc] = {"Total": 0, "Valid": 0}
-        
-        summary_work_loc[loc].append(res["Item"])
-        summary_stats[loc]["Total"] += 1
-        if "✅" in res["Status"]: summary_stats[loc]["Valid"] += 1
-
     # ==========================================
-    # 5. PENYAJIAN OUTPUT STRATEGIS
+    # 5. PENYAJIAN OUTPUT (TANPA KOSMETIK)
     # ==========================================
     
-    st.header("📊 Ringkasan Eksekutif Audit")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Pekerjaan Terdeteksi", len(pekerjaan_aktif))
-    c2.metric("Lokasi Terdampak", len(summary_work_loc))
-    
-    # Kalkulasi validitas total aman dari error division by zero
-    total_valid = sum(s['Valid'] for s in summary_stats.values())
-    total_items = sum(s['Total'] for s in summary_stats.values())
-    validitas_persen = (total_valid / total_items * 100) if total_items > 0 else 0.0
-    c3.metric("Tingkat Validitas Foto", f"{validitas_persen:.1f}%")
+    st.header("📊 Ringkasan Eksekutif")
+    c1, c2 = st.columns(2)
+    c1.info(f"Pekerjaan Diperiksa: {len(pekerjaan_aktif)}")
+    c2.info(f"Item Potensi Ditolak (Tanpa Foto): {len([x for x in final_report if '❌' in x['Status']])}")
     
     st.divider()
 
-    st.header("📍 Output 4: Resume Pekerjaan per Lokasi")
-    for loc, items in summary_work_loc.items():
-        with st.expander(f"📌 {loc} ({len(items)} Item Pekerjaan)"):
-            for i, task in enumerate(items, 1):
-                st.write(f"{i}. {task}")
+    st.header("🔍 Matriks Validasi Detail")
+    st.caption("Semua warna dinonaktifkan untuk mencegah error visualisasi sistem.")
+    
+    # PROTEKSI MUTLAK: Mengubah semua isi DataFrame menjadi string agar tidak diblokir oleh Streamlit/PyArrow
+    try:
+        df_f = pd.DataFrame(final_report).astype(str)
+        st.dataframe(df_f, use_container_width=True)
+    except Exception as e:
+        st.error("Terjadi kendala saat menggambar tabel interaktif. Menampilkan data dalam format mentah:")
+        st.write(final_report)
 
-    st.header("🔍 Output 5: Analisis Kesesuaian Dokumentasi")
-    stat_data = []
-    for loc, stat in summary_stats.items():
-        persen = (stat['Valid'] / stat['Total']) * 100 if stat['Total'] > 0 else 0
-        stat_data.append({
-            "Lokasi Madrasah": loc,
-            "Total Item Progres": stat['Total'],
-            "Item Tervalidasi Foto": stat['Valid'],
-            "Persentase Validitas": f"{persen:.1f}%",
-            "Status": "✅ AMAN" if persen == 100 else "⚠️ PERIKSA"
-        })
-    st.table(pd.DataFrame(stat_data))
-
-    st.header("📝 Matriks Audit Detail")
-    df_f = pd.DataFrame(final_report)
-    st.dataframe(df_f.style.applymap(
-        lambda v: 'background-color: #ffcccc' if "❌" in v else 'background-color: #dff0d8', 
-        subset=['Status']
-    ), use_container_width=True)
-
-    if log_error_internal:
-        st.warning("Peringatan Sistem: Mesin mendeteksi beberapa baris/tabel dengan format cacat pada PDF yang Anda unggah, namun berhasil diisolasi dan dilewati (Self-Healing Mode) tanpa menghentikan audit.")
+    st.header("📜 Draf Kesimpulan Audit")
+    ba_text = f"Telah diaudit sebanyak {len(pekerjaan_aktif)} item progres. Ditemukan {len([x for x in final_report if '❌' in x['Status']])} klaim tanpa dukungan bukti foto yang sesuai."
+    st.code(ba_text)
