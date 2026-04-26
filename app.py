@@ -22,10 +22,11 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. MESIN EKSTRAKSI (CORE LOGIC)
+# 2. MESIN EKSTRAKSI (CORE LOGIC ANTI-BADAI)
 # ==========================================
 
 def get_float(val):
+    """Memaksa teks apapun menjadi angka desimal yang benar"""
     if not val or str(val).strip().lower() in ['none', '']: return 0.0
     try:
         teks = str(val).strip()
@@ -34,14 +35,20 @@ def get_float(val):
         return float(re.sub(r'[^\d\.-]', '', teks))
     except: return 0.0
 
+def safe_get(row_list, index):
+    """Mencegah aplikasi mati jika kolom tabel menyusut (IndexError)"""
+    return row_list[index] if index < len(row_list) else ""
+
 def detect_madrasah(row_list):
+    """Mendeteksi nama lokasi di sepanjang baris tabel"""
     row_text = " ".join([str(x) for x in row_list if x]).upper()
     match = re.search(r'(MIS|MTSS|MIN|MTSN|MADRASAH\s+TSANAWIYAH|MADRASAH\s+IBTIDAIYAH)\s+[A-Z0-9\s\'\-]+', row_text)
     return match.group(0).strip() if match else None
 
 def get_keywords_list(uraian):
+    """Menyaring uraian menjadi kata kunci material fisik"""
     text = re.sub(r'\(.*?\)', '', str(uraian).upper())
-    ignore = {"PEKERJAAN", "PEMASANGAN", "PENGADAAN", "PENYEDIAAN", "PASANGAN", "REHABILITASI", "RENOVASI", "BANGUNAN", "UNTUK", "DAN", "DENGAN", "M2", "M3", "KG", "LITER", "UNIT", "BH", "LOKASI"}
+    ignore = {"PEKERJAAN", "PEMASANGAN", "PENGADAAN", "PENYEDIAAN", "PASANGAN", "REHABILITASI", "RENOVASI", "BANGUNAN", "UNTUK", "DAN", "DENGAN", "M2", "M3", "KG", "LITER", "UNIT", "BH", "LOKASI", "SUB", "TOTAL"}
     return [w for w in text.split() if w not in ignore and len(w) > 3]
 
 # ==========================================
@@ -68,29 +75,45 @@ if btn_audit:
     pekerjaan_aktif = []
     lokasi_skrg = "UMUM (TIDAK TERDETEKSI)"
     
-    # --- FASE 1: TABULASI ---
-    with st.spinner("Fase 1: Mengekstrak data kemajuan fisik..."):
-        with pdfplumber.open(f_mingguan) as pdf:
-            for page in pdf.pages:
-                if "KEMAJUAN FISIK" not in (page.extract_text() or "").upper(): continue
-                table = page.extract_table()
-                if not table: continue
-                for row in table:
-                    if len(row) < 12: continue
-                    lok_baru = detect_madrasah(row)
-                    if lok_baru: lokasi_skrg = lok_baru
+    # --- FASE 1: TABULASI (PEMBACAAN FLEKSIBEL) ---
+    with st.spinner("Fase 1: Mengekstrak data kemajuan fisik tanpa batasan format..."):
+        try:
+            with pdfplumber.open(f_mingguan) as pdf:
+                for page in pdf.pages:
+                    table = page.extract_table()
+                    if not table: continue
                     
-                    uraian = str(row[1] or row[2]).replace('\n', ' ').strip()
-                    b_ini = get_float(row[8])
-                    if b_ini > 0:
-                        pekerjaan_aktif.append({
-                            "Lokasi": lokasi_skrg, "Uraian": uraian,
-                            "Lalu": get_float(row[5]), "Ini": b_ini,
-                            "Total": get_float(row[11]), "KW": get_keywords_list(uraian)
-                        })
+                    for row in table:
+                        # Syarat sangat longgar: Asal tabel punya cukup kolom untuk menampung data progres
+                        if len(row) < 9: continue 
+                        
+                        lok_baru = detect_madrasah(row)
+                        if lok_baru: lokasi_skrg = lok_baru
+                        
+                        # Ambil uraian dengan aman
+                        uraian = str(safe_get(row, 1) or safe_get(row, 2)).replace('\n', ' ').strip()
+                        if not uraian or uraian.upper() in ['NONE', '', 'URAIAN PEKERJAAN', 'JENIS PEKERJAAN', 'NO']: continue
+                        
+                        # Periksa kolom 'Minggu Ini' (Kolom ke-8)
+                        raw_ini = str(safe_get(row, 8))
+                        if not any(c.isdigit() for c in raw_ini): continue # Pastikan itu angka
+                        
+                        b_ini = get_float(raw_ini)
+                        if b_ini > 0:
+                            pekerjaan_aktif.append({
+                                "Lokasi": lokasi_skrg, 
+                                "Uraian": uraian,
+                                "Lalu": get_float(safe_get(row, 5)), 
+                                "Ini": b_ini,
+                                "Total": get_float(safe_get(row, 11)), 
+                                "KW": get_keywords_list(uraian)
+                            })
+        except Exception as e:
+            st.error(f"Sistem gagal mengekstrak tabel Laporan Mingguan: {e}")
+            st.stop()
 
     if not pekerjaan_aktif:
-        st.error("Gagal mendeteksi progres pada tabel Kemajuan Fisik.")
+        st.error("Gagal mendeteksi progres. Pastikan Anda mengunggah dokumen Laporan Mingguan yang memiliki angka kemajuan di kolom matriksnya.")
         st.stop()
 
     # --- FASE 2: VERIFIKASI VISUAL ---
@@ -105,7 +128,7 @@ if btn_audit:
             status = "❌ DITOLAK"
             alasan = "Tidak ditemukan bukti visual yang relevan."
             
-            # Fuzzy Matching
+            # Fuzzy Matching (Pencocokan Kata Kunci)
             found_kw = [k for k in item['KW'] if k in teks_foto_db]
             if found_kw:
                 status = "✅ VALID"
@@ -119,7 +142,7 @@ if btn_audit:
                 "Progres": f"+{item['Ini']}%", "Status": status, "Analisis": alasan
             })
 
-    # --- FASE 3: KONSTRUKSI RANGKUMAN (OUTPUT BARU) ---
+    # --- FASE 3: KONSTRUKSI RANGKUMAN ---
     summary_work_loc = {}
     summary_stats = {}
 
@@ -136,16 +159,14 @@ if btn_audit:
     # 5. PENYAJIAN OUTPUT STRATEGIS
     # ==========================================
     
-    # A. DASHBOARD RINGKASAN
     st.header("📊 Ringkasan Eksekutif Audit")
     c1, c2, c3 = st.columns(3)
     c1.metric("Pekerjaan Terdeteksi", len(pekerjaan_aktif))
     c2.metric("Lokasi Terdampak", len(summary_work_loc))
-    c3.metric("Tingkat Validitas Foto", f"{(len([x for x in final_report if '✅' in x['Status']]) / len(final_report) * 100):.1f}%")
+    c3.metric("Tingkat Validitas Foto", f"{(summary_stats[list(summary_stats.keys())[0]]['Valid'] / summary_stats[list(summary_stats.keys())[0]]['Total'] * 100 if summary_stats else 0):.1f}%")
     
     st.divider()
 
-    # B. OUTPUT 4: RANGKUMAN DETAIL PEKERJAAN & LOKASI
     st.header("📍 Output 4: Resume Pekerjaan per Lokasi")
     st.write("Daftar aktivitas fisik yang diklaim mengalami kemajuan pada minggu laporan ini:")
     for loc, items in summary_work_loc.items():
@@ -153,13 +174,12 @@ if btn_audit:
             for i, task in enumerate(items, 1):
                 st.write(f"{i}. {task}")
 
-    # C. OUTPUT 5: RANGKUMAN KECOCOKAN FOTO
     st.header("🔍 Output 5: Analisis Kesesuaian Dokumentasi")
     st.write("Statistik validasi silang antara klaim progres dengan ketersediaan bukti visual:")
     
     stat_data = []
     for loc, stat in summary_stats.items():
-        persen = (stat['Valid'] / stat['Total']) * 100
+        persen = (stat['Valid'] / stat['Total']) * 100 if stat['Total'] > 0 else 0
         stat_data.append({
             "Lokasi Madrasah": loc,
             "Total Item Progres": stat['Total'],
@@ -169,7 +189,6 @@ if btn_audit:
         })
     st.table(pd.DataFrame(stat_data))
 
-    # D. DETAIL DATA (TABEL LENGKAP)
     st.header("📝 Matriks Audit Detail")
     df_f = pd.DataFrame(final_report)
     st.dataframe(df_f.style.applymap(
@@ -177,7 +196,6 @@ if btn_audit:
         subset=['Status']
     ), use_container_width=True)
 
-    # E. BERITA ACARA
     st.header("📜 Draft Kesimpulan Audit")
     ba_text = f"Berdasarkan audit sekuensial, ditemukan {len(summary_work_loc)} lokasi aktif. "
     ba_text += f"Dari total {len(final_report)} item klaim, sebanyak {len([x for x in final_report if '❌' in x['Status']])} item TIDAK didukung foto yang sinkron."
