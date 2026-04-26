@@ -1,162 +1,139 @@
-import streamlit as st
 import pdfplumber
 import pandas as pd
-import fitz  # PyMuPDF
-import io
-import re
-from datetime import datetime
+from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
 
-# ==========================================
-# 1. KONFIGURASI UI (SAFE MODE)
-# ==========================================
-st.set_page_config(page_title="Audit Forensik PHTC", page_icon="⚖️", layout="wide")
-st.markdown("<style>.main { background-color: #f4f7f9; }</style>", unsafe_allow_html=True)
+class ForensicProgressAuditor:
+    def __init__(self, strictness_threshold=75):
+        """
+        Inisialisasi sistem audit.
+        strictness_threshold: Batas toleransi kemiripan teks (0-100).
+        Angka 75 adalah standar tinggi untuk memastikan akurasi tanpa kompromi.
+        """
+        self.strictness = strictness_threshold
+        self.audit_log = []
 
-# ==========================================
-# 2. MESIN EKSTRAKSI KEBANGKITAN
-# ==========================================
-def get_float(val):
-    if val is None: return 0.0
-    try:
-        teks = str(val).strip()
-        if teks.lower() in ['none', '', '-']: return 0.0
-        if ',' in teks and '.' in teks: teks = teks.replace('.', '').replace(',', '.')
-        elif ',' in teks: teks = teks.replace(',', '.')
-        return float(re.sub(r'[^\d\.-]', '', teks))
-    except: return 0.0
+    def extract_claims(self, pdf_mingguan_path):
+        """
+        Modul ekstraksi: Menarik daftar 'Pekerjaan Minggu Ini' dari Laporan Mingguan.
+        (Output disimulasikan sebagai dictionary untuk kemudahan integrasi).
+        """
+        # Dalam implementasi nyata, gunakan pdfplumber untuk membaca tabel/teks.
+        # Simulasi output hasil ekstraksi per lokasi:
+        laporan_klaim = {
+            "MIS NURUL KHAIRAT": [
+                "Pekerjaan pasang rangka plafond bangunan A",
+                "Pekerjaan instalasi listrik Bangunan A",
+                "Pekerjaan pemasangan bekisting balok serta plat lantai 1"
+            ],
+            "MIS DARUL ULUM PUTERA": [
+                "Pekerjaan Pemasangan bekisting Bangunan B & E",
+                "Pekerjaan fabrikasi pembesian balok Bangunan B & E",
+                "Pekerjaan rangka plafond Bangunan A"
+            ]
+        }
+        return laporan_klaim
 
-def safe_get(row_list, index):
-    if not row_list or index >= len(row_list): return ""
-    val = row_list[index]
-    return str(val).strip() if val is not None else ""
+    def extract_visual_evidence(self, pdf_dokumentasi_path):
+        """
+        Modul ekstraksi: Menarik teks 'Kegiatan' dari bawah foto Laporan Dokumentasi.
+        """
+        # Simulasi output hasil ekstraksi kapsi foto:
+        laporan_foto = {
+            "MIS NURUL KHAIRAT": [
+                "Pekerjaan plamiran dinding Bangunan A",
+                "Pekerjaan Pemasangan penutup Atap Bangunan A",
+                "Pekerjaan Rangka Plafond Bangunan A",
+                "Pekerjaan Pemasangan Bekisting Balok Bangunan B"
+            ],
+            "MIS DARUL ULUM PUTERA": [
+                "Pekerjaan Pemasangan rangka plafond Bangunan A",
+                "Pekerjaan Pasang penutup atap teras Bangunan A",
+                "Pekerjaan bekisting balok dan plat lantai Bangunan B",
+                "Pekerjaan pengecoran Pondasi Telapak Bangunan B",
+                "Pekerjaan pengecoran Pondasi Telapak Bangunan E"
+            ]
+        }
+        return laporan_foto
 
-def detect_madrasah(row_list):
-    if not row_list: return None
-    row_text = " ".join([str(x) for x in row_list if x]).upper()
-    match = re.search(r'(MIS|MTSS|MIN|MTSN|MADRASAH\s+TSANAWIYAH|MADRASAH\s+IBTIDAIYAH)\s+[A-Z0-9\s\'\-]+', row_text)
-    return match.group(0).strip() if match else None
+    def execute_cross_audit(self, claims, evidences):
+        """
+        Mesin Utama Audit Forensik: Mengadu Klaim vs Bukti Visual.
+        """
+        print("======================================================")
+        print("MEMULAI AUDIT FORENSIK: KLAIM VS REALITAS VISUAL")
+        print("======================================================\n")
 
-def get_keywords_list(uraian):
-    if not uraian: return []
-    text = re.sub(r'\(.*?\)', '', str(uraian).upper())
-    ignore = {"PEKERJAAN", "PEMASANGAN", "PENGADAAN", "PENYEDIAAN", "PASANGAN", "REHABILITASI", "RENOVASI", "BANGUNAN", "UNTUK", "DAN", "DENGAN", "M2", "M3", "KG", "LITER", "UNIT", "BH", "LOKASI", "SUB", "TOTAL"}
-    return [w for w in text.split() if w not in ignore and len(w) > 3]
-
-# ==========================================
-# 3. INTERFACE PENGAWASAN
-# ==========================================
-st.title("🛡️ Audit Forensik PHTC (Safe Render Mode)")
-st.caption("Mode Anti-Crash: Menonaktifkan rendering gaya untuk kompatibilitas penuh.")
-
-with st.sidebar:
-    st.header("📂 Data Proyek")
-    f_mingguan = st.file_uploader("Upload Laporan Mingguan", type="pdf")
-    f_foto = st.file_uploader("Upload Laporan Dokumentasi", type="pdf")
-    btn_audit = st.button("🚀 JALANKAN AUDIT", use_container_width=True)
-
-if not (f_mingguan and f_foto):
-    st.info("Sistem stand-by. Unggah dokumen.")
-    st.stop()
-
-# ==========================================
-# 4. EKSEKUSI AUDIT
-# ==========================================
-if btn_audit:
-    pekerjaan_aktif = []
-    lokasi_skrg = "UMUM (TIDAK TERDETEKSI)"
-    
-    with st.spinner("Fase 1: Mengekstrak tabel kemajuan fisik..."):
-        try:
-            with pdfplumber.open(f_mingguan) as pdf:
-                for page in pdf.pages:
-                    tables = page.extract_tables()
-                    if not tables: continue
-                    for table in tables:
-                        for row in table:
-                            try:
-                                if not row or len(row) < 9: continue 
-                                lok_baru = detect_madrasah(row)
-                                if lok_baru: lokasi_skrg = lok_baru
-                                
-                                uraian = safe_get(row, 1)
-                                if not uraian or len(uraian) < 3: uraian = safe_get(row, 2)
-                                if not uraian or uraian.upper() in ['NONE', '', 'URAIAN PEKERJAAN', 'JENIS PEKERJAAN', 'NO']: continue
-                                
-                                raw_ini = safe_get(row, 8)
-                                if not any(c.isdigit() for c in raw_ini): continue
-                                
-                                b_ini = get_float(raw_ini)
-                                if b_ini > 0:
-                                    pekerjaan_aktif.append({
-                                        "Lokasi": lokasi_skrg, 
-                                        "Uraian": uraian,
-                                        "Lalu": get_float(safe_get(row, 5)), 
-                                        "Ini": b_ini,
-                                        "Total": get_float(safe_get(row, 11)), 
-                                        "KW": get_keywords_list(uraian)
-                                    })
-                            except: continue 
-        except Exception as e:
-            st.error(f"Gagal membedah PDF Laporan Mingguan: {e}")
-            st.stop()
-
-    if not pekerjaan_aktif:
-        st.error("Gagal mendeteksi progres. Tabel mungkin tidak sesuai standar KemenPU.")
-        st.stop()
-
-    with st.spinner("Fase 2: Validasi silang dengan dokumentasi..."):
-        teks_foto_db = ""
-        try:
-            doc_foto = fitz.open(stream=f_foto.read(), filetype="pdf")
-            for p in doc_foto: teks_foto_db += p.get_text("text").upper() + " "
-            doc_foto.close()
-        except Exception as e:
-            st.error(f"Gagal membaca PDF Laporan Foto: {e}")
-            st.stop()
-        
-        final_report = []
-        for item in pekerjaan_aktif:
-            status = "❌ DITOLAK"
-            alasan = "Tidak ditemukan bukti visual yang relevan."
+        for lokasi, list_klaim in claims.items():
+            print(f"LOKASI: {lokasi}")
+            print("-" * 50)
             
-            found_kw = [k for k in item['KW'] if k in teks_foto_db]
-            if found_kw:
-                status = "✅ VALID"
-                alasan = f"Kata kunci ditemukan: {', '.join(found_kw)}"
-            elif not item['KW']:
-                status = "⚠️ MANUAL"
-                alasan = "Uraian terlalu umum."
+            list_bukti = evidences.get(lokasi, [])
             
-            final_report.append({
-                "Lokasi": item['Lokasi'], 
-                "Item": item['Uraian'],
-                "Progres": f"+{item['Ini']}%", 
-                "Status": status, 
-                "Analisis": alasan
-            })
+            if not list_bukti:
+                print(f"[FATAL ERROR] Nol bukti visual ditemukan untuk {lokasi}!\n")
+                continue
 
-    # ==========================================
-    # 5. PENYAJIAN OUTPUT (TANPA KOSMETIK)
-    # ==========================================
-    
-    st.header("📊 Ringkasan Eksekutif")
-    c1, c2 = st.columns(2)
-    c1.info(f"Pekerjaan Diperiksa: {len(pekerjaan_aktif)}")
-    c2.info(f"Item Potensi Ditolak (Tanpa Foto): {len([x for x in final_report if '❌' in x['Status']])}")
-    
-    st.divider()
+            for klaim in list_klaim:
+                # Menggunakan Fuzzy Matching untuk mencari kemiripan teks terbaik
+                best_match, score = process.extractOne(klaim, list_bukti, scorer=fuzz.token_set_ratio)
 
-    st.header("🔍 Matriks Validasi Detail")
-    st.caption("Semua warna dinonaktifkan untuk mencegah error visualisasi sistem.")
-    
-    # PROTEKSI MUTLAK: Mengubah semua isi DataFrame menjadi string agar tidak diblokir oleh Streamlit/PyArrow
-    try:
-        df_f = pd.DataFrame(final_report).astype(str)
-        st.dataframe(df_f, use_container_width=True)
-    except Exception as e:
-        st.error("Terjadi kendala saat menggambar tabel interaktif. Menampilkan data dalam format mentah:")
-        st.write(final_report)
+                if score >= self.strictness:
+                    status = "TERVERIFIKASI"
+                    indikator = "[V]"
+                    catatan = f"Terdokumentasi sebagai: '{best_match}' (Akurasi: {score}%)"
+                else:
+                    status = "TIDAK TERBUKTI (RED FLAG)"
+                    indikator = "[X]"
+                    catatan = f"Klaim gagal dibuktikan. Kemiripan tertinggi hanya {score}% ('{best_match}')"
+                    
+                    # Simpan ke daftar pelanggaran untuk eksekusi penolakan
+                    self.audit_log.append({
+                        "Lokasi": lokasi,
+                        "Klaim Fiktif/Tanpa Bukti": klaim,
+                        "Rekomendasi": "Coret bobot % item ini. Tolak pembayaran."
+                    })
 
-    st.header("📜 Draf Kesimpulan Audit")
-    ba_text = f"Telah diaudit sebanyak {len(pekerjaan_aktif)} item progres. Ditemukan {len([x for x in final_report if '❌' in x['Status']])} klaim tanpa dukungan bukti foto yang sesuai."
-    st.code(ba_text)
+                print(f"{indikator} KLAIM   : {klaim}")
+                print(f"    STATUS  : {status}")
+                print(f"    CATATAN : {catatan}\n")
+            
+            # Cek anomali kebalikan (Ada foto, tapi tidak diklaim di laporan)
+            self._detect_unclaimed_evidence(list_klaim, list_bukti)
+
+    def _detect_unclaimed_evidence(self, list_klaim, list_bukti):
+        """
+        Mendeteksi foto pekerjaan yang dikerjakan tapi tidak ada di laporan mingguan (Inkonsistensi Admin).
+        """
+        print("    [!] AUDIT INKONSISTENSI ADMINISTRASI:")
+        for bukti in list_bukti:
+            best_match, score = process.extractOne(bukti, list_klaim, scorer=fuzz.token_set_ratio)
+            if score < self.strictness:
+                print(f"    -> Anomali: Terdapat foto '{bukti}' namun tidak tercatat di Laporan Mingguan.")
+        print("\n")
+
+    def generate_verdict(self):
+        """
+        Menghasilkan Keputusan Eksekusi Final.
+        """
+        print("======================================================")
+        print("REKAPITULASI PELANGGARAN & KEPUTUSAN EKSEKUSI")
+        print("======================================================")
+        if not self.audit_log:
+            print("Status: BERSIH. Seluruh klaim memiliki presisi visual yang dapat dipertanggungjawabkan.")
+        else:
+            df_log = pd.DataFrame(self.audit_log)
+            print(df_log.to_string(index=False))
+            print("\nKEPUTUSAN: KEMBALIKAN LAPORAN. Dokumen tidak memenuhi standar presisi minimum.")
+
+# Eksekusi Program
+if __name__ == "__main__":
+    auditor = ForensicProgressAuditor(strictness_threshold=75)
+    
+    # Tarik data dari PDF (menggunakan dummy data dari simulasi sebelumnya)
+    klaim_mingguan = auditor.extract_claims("laporan_mingguan_ke_14.pdf")
+    bukti_foto = auditor.extract_visual_evidence("laporan_dokumentasi_ke_14.pdf")
+    
+    # Jalankan Audit
+    auditor.execute_cross_audit(klaim_mingguan, bukti_foto)
+    auditor.generate_verdict()
